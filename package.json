@@ -1,0 +1,25 @@
+{
+  "name": "burner-monorepo",
+  "private": true,
+  "version": "0.1.0",
+  "packageManager": "pnpm@10.6.2",
+  "scripts": {
+    "dev:mobile": "pnpm --filter burner-mobile dev",
+    "dev:web": "pnpm --filter burner-web dev",
+    "supabase:start": "NPM_CONFIG_CACHE=./.npm-cache npx supabase start",
+    "supabase:status": "NPM_CONFIG_CACHE=./.npm-cache npx supabase status -o env",
+    "supabase:functions": "NPM_CONFIG_CACHE=./.npm-cache npx supabase functions serve --env-file supabase/.env.local",
+    "lint": "turbo run lint",
+    "typecheck": "turbo run typecheck",
+    "test": "turbo run test",
+    "build": "turbo run build",
+    "format": "prettier --write ."
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.2",
+    "prettier": "^3.4.2",
+    "turbo": "^2.4.0",
+    "typescript": "^5.7.2",
+    "vitest": "^2.1.8"
+  }
+}

@@ -1,0 +1,21 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "strict": true,
+    "allowJs": false,
+    "esModuleInterop": true,
+    "forceConsistentCasingInFileNames": true,
+    "resolveJsonModule": true,
+    "skipLibCheck": true,
+    "noEmit": true,
+    "baseUrl": ".",
+    "paths": {
+      "@burner/core": ["packages/core/src/index.ts"],
+      "@burner/core/*": ["packages/core/src/*"],
+      "@burner/ui": ["packages/ui/src/index.ts"],
+      "@burner/ui/*": ["packages/ui/src/*"]
+    }
+  }
+}
