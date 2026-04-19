@@ -285,7 +285,11 @@ function moveTrackToIndex(
 }
 
 export function HomeClient() {
-  const supabase = useMemo(() => getBrowserSupabaseClient(), []);
+  const supabase = useMemo<SupabaseClient | null>(
+    () =>
+      runtimeFlags.isSupabaseConfigured ? getBrowserSupabaseClient() : null,
+    [],
+  );
   const [session, setSession] = useState<Session | null>(null);
   const [email, setEmail] = useState("");
   const [authMessage, setAuthMessage] = useState<string | null>(null);
@@ -345,6 +349,14 @@ export function HomeClient() {
   );
 
   useEffect(() => {
+    if (!supabase) {
+      setSession(null);
+      setSenderName((current) =>
+        current.trim() ? current : defaultDraft.senderName,
+      );
+      return;
+    }
+
     let active = true;
 
     supabase.auth.getSession().then(({ data }) => {
@@ -775,6 +787,13 @@ export function HomeClient() {
   }
 
   async function handleMagicLink() {
+    if (!supabase) {
+      setAuthMessage(
+        "Supabase auth is not configured on this deployment yet.",
+      );
+      return;
+    }
+
     if (!email.trim()) {
       setAuthMessage(
         "Drop in an email if you want the magic-link sender flow.",
@@ -801,6 +820,13 @@ export function HomeClient() {
   }
 
   async function handleOAuth(provider: "google" | "apple") {
+    if (!supabase) {
+      setAuthMessage(
+        "Supabase auth is not configured on this deployment yet.",
+      );
+      return;
+    }
+
     await runAuthAction(provider, async () => {
       const { data, error } = await supabase.auth.signInWithOAuth({
         provider,
@@ -824,6 +850,13 @@ export function HomeClient() {
   }
 
   async function handleDemoSignIn() {
+    if (!supabase) {
+      setAuthMessage(
+        "Supabase auth is not configured on this deployment yet.",
+      );
+      return;
+    }
+
     await runAuthAction("demo", async () => {
       const nextSession = await bootstrapDemoSession(supabase);
       if (!nextSession) {
@@ -833,6 +866,10 @@ export function HomeClient() {
   }
 
   async function handleSignOut() {
+    if (!supabase) {
+      return;
+    }
+
     await runAuthAction("signout", async () => {
       const { error } = await supabase.auth.signOut();
       if (error) {
@@ -1116,7 +1153,7 @@ export function HomeClient() {
   }
 
   async function publishBurner() {
-    if (!session) {
+    if (runtimeFlags.isSupabaseConfigured && !session) {
       setAuthMessage("Sign in before publishing a burner.");
       return;
     }
@@ -1148,6 +1185,17 @@ export function HomeClient() {
         revealMode: "verified-or-timed",
         tracks,
       };
+
+      if (!supabase || !session) {
+        const localResult = buildLocalPublishResult(draft);
+        storePublishedShare(localResult);
+        setAuthMessage(
+          localResult.warnings?.join(" ") ??
+            "Burner created a browser-only share link for this mixtape.",
+        );
+        return;
+      }
+
       const { data, error } = await supabase.functions.invoke("create-burner", {
         headers: {
           Authorization: `Bearer ${session.access_token}`,
@@ -1238,6 +1286,10 @@ export function HomeClient() {
     activePlaylistPreviewIndex < tracks.length - 1;
   const transportIsBusy =
     previewBusyTrackId !== null || previewState === "loading";
+  const browserOnlyMode = !runtimeFlags.isSupabaseConfigured;
+  const browserOnlyModeMessage = browserOnlyMode
+    ? "Browser-only publishing is active on this deployment. Burner will pack the mixtape into the share link itself, so extra-large playlists can be too long to send."
+    : null;
   const shareDialogEmailHref = publishResult
     ? buildShareEmailHref({
         senderName,
@@ -1246,22 +1298,7 @@ export function HomeClient() {
       })
     : "";
 
-  if (!runtimeFlags.isSupabaseConfigured) {
-    return (
-      <main className="app-shell">
-        <section className="panel stack-md">
-          <span className="eyebrow">configuration</span>
-          <h2 className="panel-title">Supabase env is not loaded.</h2>
-          <p className="muted-copy">
-            Burner still needs Supabase configured before you can publish links
-            from the web app.
-          </p>
-        </section>
-      </main>
-    );
-  }
-
-  if (!session) {
+  if (runtimeFlags.isSupabaseConfigured && !session) {
     return (
       <main className="app-shell itunes-shell">
         <section className="itunes-window itunes-window--signin">
@@ -1347,14 +1384,16 @@ export function HomeClient() {
             >
               {studioBusy ? "Burning..." : "Burn Link"}
             </button>
-            <button
-              className="button button--secondary"
-              disabled={authBusy !== null}
-              onClick={handleSignOut}
-              type="button"
-            >
-              Sign Out
-            </button>
+            {runtimeFlags.isSupabaseConfigured ? (
+              <button
+                className="button button--secondary"
+                disabled={authBusy !== null}
+                onClick={handleSignOut}
+                type="button"
+              >
+                Sign Out
+              </button>
+            ) : null}
           </div>
         </header>
 
@@ -1378,6 +1417,12 @@ export function HomeClient() {
               </div>
             </div>
           </div>
+        ) : null}
+
+        {browserOnlyModeMessage ? (
+          <p className="status-message status-message--compact">
+            {browserOnlyModeMessage}
+          </p>
         ) : null}
 
         {showShareDialog && publishResult ? (
