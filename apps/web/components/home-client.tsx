@@ -1,5 +1,7 @@
 "use client";
 
+import Link from "next/link";
+import Script from "next/script";
 import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import type { DragEvent } from "react";
 
@@ -22,7 +24,7 @@ import {
   buildInAppPreviewEmbedUrl,
   supportsInAppPreview,
 } from "../lib/track-preview";
-import { runtimeFlags } from "../lib/env";
+import { env, runtimeFlags } from "../lib/env";
 import { getBrowserSupabaseClient } from "../lib/supabase";
 import { loadYouTubeIframeApi } from "../lib/youtube-player";
 import {
@@ -54,6 +56,25 @@ interface YouTubeResolveResponse {
 
 type PreviewTransport = "audio" | "embed" | "youtube" | null;
 const BURN_ANIMATION_DURATION_MS = 1800;
+
+declare global {
+  interface Window {
+    turnstile?: {
+      remove(widgetId: string): void;
+      render(
+        container: HTMLElement,
+        options: {
+          callback?: (token: string) => void;
+          "error-callback"?: () => void;
+          "expired-callback"?: () => void;
+          sitekey: string;
+          theme?: "light" | "dark" | "auto";
+        },
+      ): string;
+      reset(widgetId?: string): void;
+    };
+  }
+}
 
 function slugifyBurnerTitle(value: string) {
   const normalized = value
@@ -209,37 +230,6 @@ function deriveSenderName(session: Session | null) {
   );
 }
 
-async function bootstrapDemoSession(supabase: SupabaseClient) {
-  const email = "web-sender@burner.local";
-  const password = "burner-demo-pass";
-
-  const signIn = await supabase.auth.signInWithPassword({ email, password });
-  if (!signIn.error) {
-    return signIn.data.session ?? null;
-  }
-
-  const signUp = await supabase.auth.signUp({
-    email,
-    password,
-    options: {
-      data: {
-        display_name: "Web Sender",
-      },
-    },
-  });
-
-  if (signUp.error) {
-    throw signUp.error;
-  }
-
-  const retry = await supabase.auth.signInWithPassword({ email, password });
-  if (retry.error) {
-    throw retry.error;
-  }
-
-  return retry.data.session ?? signUp.data.session ?? null;
-}
-
 function reorderTracks(
   tracks: ImportedTrack[],
   trackId: string,
@@ -292,6 +282,13 @@ export function HomeClient() {
   );
   const [session, setSession] = useState<Session | null>(null);
   const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [signupDisplayName, setSignupDisplayName] = useState("");
+  const [authMode, setAuthMode] = useState<"signin" | "signup" | "forgot">(
+    "signin",
+  );
+  const [captchaToken, setCaptchaToken] = useState("");
+  const [turnstileReady, setTurnstileReady] = useState(false);
   const [authMessage, setAuthMessage] = useState<string | null>(null);
   const [previewMessage, setPreviewMessage] = useState<string | null>(null);
   const [authBusy, setAuthBusy] = useState<string | null>(null);
@@ -337,10 +334,15 @@ export function HomeClient() {
   const youtubePlayerRef = useRef<YouTubePlayer | null>(null);
   const youtubeAutoplayRef = useRef(false);
   const previewTransportRef = useRef<PreviewTransport>(null);
+  const turnstileHostRef = useRef<HTMLDivElement | null>(null);
+  const turnstileWidgetIdRef = useRef<string | null>(null);
   const previewEmbedUrl = useMemo(
     () => (previewTrack ? buildInAppPreviewEmbedUrl(previewTrack) : null),
     [previewTrack],
   );
+  const turnstileConfigured = Boolean(env.turnstileSiteKey.trim());
+  const turnstileRequired =
+    turnstileConfigured && (authMode === "signup" || authMode === "forgot");
   const showingEmbeddedPreview = Boolean(
     previewTransport === "embed" && previewTrack && previewEmbedUrl,
   );
@@ -399,6 +401,47 @@ export function HomeClient() {
   useEffect(() => {
     previewTransportRef.current = previewTransport;
   }, [previewTransport]);
+
+  useEffect(() => {
+    if (
+      !turnstileRequired ||
+      !turnstileReady ||
+      !turnstileHostRef.current ||
+      !window.turnstile
+    ) {
+      return;
+    }
+
+    setCaptchaToken("");
+    turnstileHostRef.current.innerHTML = "";
+
+    const widgetId = window.turnstile.render(turnstileHostRef.current, {
+      sitekey: env.turnstileSiteKey,
+      theme: "light",
+      callback: (token) => {
+        setCaptchaToken(token);
+        setAuthMessage(null);
+      },
+      "expired-callback": () => {
+        setCaptchaToken("");
+      },
+      "error-callback": () => {
+        setCaptchaToken("");
+        setAuthMessage(
+          "The security check did not load correctly. Refresh and try again.",
+        );
+      },
+    });
+
+    turnstileWidgetIdRef.current = widgetId;
+
+    return () => {
+      if (turnstileWidgetIdRef.current && window.turnstile) {
+        window.turnstile.remove(turnstileWidgetIdRef.current);
+      }
+      turnstileWidgetIdRef.current = null;
+    };
+  }, [turnstileRequired, turnstileReady]);
 
   useEffect(() => {
     if (!showShareDialog) {
@@ -786,40 +829,129 @@ export function HomeClient() {
     }
   }
 
-  async function handleMagicLink() {
+  async function handleSignInPassword() {
     if (!supabase) {
-      setAuthMessage(
-        "Supabase auth is not configured on this deployment yet.",
-      );
+      setAuthMessage("Supabase auth is not configured on this deployment yet.");
+      return;
+    }
+
+    if (!email.trim() || !password) {
+      setAuthMessage("Enter your email and password.");
+      return;
+    }
+
+    await runAuthAction("signin", async () => {
+      const { error } = await supabase.auth.signInWithPassword({
+        email: email.trim(),
+        password,
+        options: {
+          captchaToken: captchaToken || undefined,
+        },
+      });
+      if (error) {
+        throw error;
+      }
+      setPassword("");
+      setCaptchaToken("");
+      if (turnstileWidgetIdRef.current && window.turnstile) {
+        window.turnstile.reset(turnstileWidgetIdRef.current);
+      }
+    });
+  }
+
+  async function handleSignUp() {
+    if (!supabase) {
+      setAuthMessage("Supabase auth is not configured on this deployment yet.");
+      return;
+    }
+
+    if (!email.trim() || !password) {
+      setAuthMessage("Enter an email and a password (8+ characters).");
+      return;
+    }
+
+    if (password.length < 8) {
+      setAuthMessage("Use a password with at least 8 characters.");
+      return;
+    }
+
+    if (turnstileRequired && !captchaToken) {
+      setAuthMessage("Complete the security check before creating your account.");
+      return;
+    }
+
+    await runAuthAction("signup", async () => {
+      try {
+        const { data, error } = await supabase.auth.signUp({
+          email: email.trim(),
+          password,
+          options: {
+            captchaToken: captchaToken || undefined,
+            emailRedirectTo: `${window.location.origin}/auth/callback`,
+            data: signupDisplayName.trim()
+              ? { display_name: signupDisplayName.trim() }
+              : undefined,
+          },
+        });
+        if (error) {
+          throw error;
+        }
+        setPassword("");
+        setCaptchaToken("");
+        if (!data.session) {
+          setAuthMessage(
+            "Account created. Sign in with your new password to continue.",
+          );
+          setAuthMode("signin");
+        }
+      } finally {
+        if (turnstileWidgetIdRef.current && window.turnstile) {
+          window.turnstile.reset(turnstileWidgetIdRef.current);
+        }
+      }
+    });
+  }
+
+  async function handleForgotPassword() {
+    if (!supabase) {
+      setAuthMessage("Supabase auth is not configured on this deployment yet.");
       return;
     }
 
     if (!email.trim()) {
+      setAuthMessage("Enter the email on your account to get a reset link.");
+      return;
+    }
+
+    if (turnstileRequired && !captchaToken) {
       setAuthMessage(
-        "Drop in an email if you want the magic-link sender flow.",
+        "Complete the security check before requesting a reset link.",
       );
       return;
     }
 
-    await runAuthAction("magic", async () => {
-      const { error } = await supabase.auth.signInWithOtp({
-        email: email.trim(),
-        options: {
-          emailRedirectTo: `${window.location.origin}/auth/callback`,
+    await runAuthAction("forgot", async () => {
+      const { error } = await supabase.auth.resetPasswordForEmail(
+        email.trim(),
+        {
+          captchaToken: captchaToken || undefined,
+          redirectTo: `${window.location.origin}/auth/callback`,
         },
-      });
-
+      );
       if (error) {
         throw error;
       }
-
+      setCaptchaToken("");
+      if (turnstileWidgetIdRef.current && window.turnstile) {
+        window.turnstile.reset(turnstileWidgetIdRef.current);
+      }
       setAuthMessage(
-        "Magic link requested. Open the sign-in link from your inbox to continue.",
+        "Password reset link sent. Check your inbox and click through to set a new password.",
       );
     });
   }
 
-  async function handleOAuth(provider: "google" | "apple") {
+  async function handleOAuth(provider: "google") {
     if (!supabase) {
       setAuthMessage(
         "Supabase auth is not configured on this deployment yet.",
@@ -841,27 +973,11 @@ export function HomeClient() {
 
       if (!data.url) {
         throw new Error(
-          `${provider === "apple" ? "Apple" : "Google"} OAuth is not configured in local Supabase yet.`,
+          "Google OAuth is not configured in Supabase yet.",
         );
       }
 
       window.location.assign(data.url);
-    });
-  }
-
-  async function handleDemoSignIn() {
-    if (!supabase) {
-      setAuthMessage(
-        "Supabase auth is not configured on this deployment yet.",
-      );
-      return;
-    }
-
-    await runAuthAction("demo", async () => {
-      const nextSession = await bootstrapDemoSession(supabase);
-      if (!nextSession) {
-        throw new Error("Burner could not bootstrap the local demo sender.");
-      }
     });
   }
 
@@ -1301,6 +1417,13 @@ export function HomeClient() {
   if (runtimeFlags.isSupabaseConfigured && !session) {
     return (
       <main className="app-shell itunes-shell">
+        {turnstileRequired ? (
+          <Script
+            src="https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit"
+            strategy="afterInteractive"
+            onLoad={() => setTurnstileReady(true)}
+          />
+        ) : null}
         <section className="itunes-window itunes-window--signin">
           <header className="itunes-titlebar">
             <div aria-hidden="true" className="itunes-traffic">
@@ -1314,50 +1437,187 @@ export function HomeClient() {
 
           <div className="itunes-signin">
             <div className="itunes-signin__card">
-              <h1>Sign In</h1>
+              <h1>
+                {authMode === "signup"
+                  ? "Create Account"
+                  : authMode === "forgot"
+                    ? "Reset Password"
+                    : "Sign In"}
+              </h1>
               <p className="muted-copy">
-                Paste YouTube songs, sequence the disc, then publish a private
-                Burner link.
+                {authMode === "signup"
+                  ? "Make an account to save your burns and pick up where you left off."
+                  : authMode === "forgot"
+                    ? "Enter your email and we'll send a link to set a new password."
+                    : "Sign in to build mixtapes and see your burn history."}
               </p>
-              <label className="field">
-                <span>Email</span>
-                <input
-                  className="input"
-                  placeholder="you@burner.fm"
-                  value={email}
-                  onChange={(event) => setEmail(event.target.value)}
-                />
-              </label>
-              <div className="button-row">
+
+              <form
+                className="itunes-signin__form"
+                onSubmit={(event) => {
+                  event.preventDefault();
+                  if (authMode === "signup") void handleSignUp();
+                  else if (authMode === "forgot") void handleForgotPassword();
+                  else void handleSignInPassword();
+                }}
+              >
+                {authMode === "signup" ? (
+                  <label className="field">
+                    <span>Display name</span>
+                    <input
+                      autoComplete="name"
+                      className="input"
+                      placeholder="Skye"
+                      value={signupDisplayName}
+                      onChange={(event) =>
+                        setSignupDisplayName(event.target.value)
+                      }
+                    />
+                  </label>
+                ) : null}
+
+                <label className="field">
+                  <span>Email</span>
+                  <input
+                    autoComplete="email"
+                    className="input"
+                    inputMode="email"
+                    placeholder="you@burner.fm"
+                    type="email"
+                    value={email}
+                    onChange={(event) => setEmail(event.target.value)}
+                  />
+                </label>
+
+                {authMode !== "forgot" ? (
+                  <label className="field">
+                    <span>Password</span>
+                    <input
+                      autoComplete={
+                        authMode === "signup"
+                          ? "new-password"
+                          : "current-password"
+                      }
+                      className="input"
+                      minLength={authMode === "signup" ? 8 : undefined}
+                      placeholder={
+                        authMode === "signup"
+                          ? "At least 8 characters"
+                          : "Your password"
+                      }
+                      type="password"
+                      value={password}
+                      onChange={(event) => setPassword(event.target.value)}
+                    />
+                  </label>
+                ) : null}
+
+                {turnstileRequired ? (
+                  <div className="itunes-signin__captcha">
+                    <span>Security check</span>
+                    <div
+                      className="itunes-signin__captcha-host"
+                      ref={turnstileHostRef}
+                    />
+                  </div>
+                ) : null}
+
                 <button
                   className="button button--primary"
-                  disabled={authBusy !== null}
-                  onClick={handleDemoSignIn}
+                  disabled={
+                    authBusy !== null || (turnstileRequired && !captchaToken)
+                  }
+                  type="submit"
                 >
-                  {authBusy === "demo" ? "Loading..." : "Local Account"}
+                  {authMode === "signup"
+                    ? authBusy === "signup"
+                      ? "Creating..."
+                      : "Create Account"
+                    : authMode === "forgot"
+                      ? authBusy === "forgot"
+                        ? "Sending..."
+                        : "Send Reset Link"
+                      : authBusy === "signin"
+                        ? "Signing in..."
+                        : "Sign In"}
                 </button>
-                <button
-                  className="button button--secondary"
-                  disabled={authBusy !== null}
-                  onClick={handleMagicLink}
-                >
-                  {authBusy === "magic" ? "Requesting..." : "Magic Link"}
-                </button>
-                <button
-                  className="button button--secondary"
-                  disabled={authBusy !== null}
-                  onClick={() => handleOAuth("google")}
-                >
-                  Google
-                </button>
-                <button
-                  className="button button--secondary"
-                  disabled={authBusy !== null}
-                  onClick={() => handleOAuth("apple")}
-                >
-                  Apple
-                </button>
+
+                {authMode === "signin" ? (
+                  <button
+                    className="itunes-signin__link"
+                    disabled={authBusy !== null}
+                    onClick={() => {
+                      setAuthMessage(null);
+                      setAuthMode("forgot");
+                    }}
+                    type="button"
+                  >
+                    Forgot password?
+                  </button>
+                ) : null}
+              </form>
+
+              <div className="itunes-signin__divider">
+                <span>or</span>
               </div>
+
+              <button
+                className="button button--secondary"
+                disabled={authBusy !== null}
+                onClick={() => handleOAuth("google")}
+                type="button"
+              >
+                {authBusy === "google"
+                  ? "Redirecting..."
+                  : "Continue with Google"}
+              </button>
+
+              <p className="itunes-signin__swap">
+                {authMode === "signin" ? (
+                  <>
+                    New to Burner?{" "}
+                    <button
+                      className="itunes-signin__link"
+                      disabled={authBusy !== null}
+                      onClick={() => {
+                        setAuthMessage(null);
+                        setAuthMode("signup");
+                      }}
+                      type="button"
+                    >
+                      Create an account
+                    </button>
+                  </>
+                ) : authMode === "signup" ? (
+                  <>
+                    Already have an account?{" "}
+                    <button
+                      className="itunes-signin__link"
+                      disabled={authBusy !== null}
+                      onClick={() => {
+                        setAuthMessage(null);
+                        setAuthMode("signin");
+                      }}
+                      type="button"
+                    >
+                      Sign in
+                    </button>
+                  </>
+                ) : (
+                  <button
+                    className="itunes-signin__link"
+                    disabled={authBusy !== null}
+                    onClick={() => {
+                      setAuthMessage(null);
+                      setAuthMode("signin");
+                    }}
+                    type="button"
+                  >
+                    ← Back to sign in
+                  </button>
+                )}
+              </p>
+
               {authMessage ? (
                 <p className="status-message">{authMessage}</p>
               ) : null}
@@ -1384,6 +1644,11 @@ export function HomeClient() {
             >
               {studioBusy ? "Burning..." : "Burn Link"}
             </button>
+            {runtimeFlags.isSupabaseConfigured && session ? (
+              <Link className="button button--secondary" href="/my-burns">
+                My Burns
+              </Link>
+            ) : null}
             {runtimeFlags.isSupabaseConfigured ? (
               <button
                 className="button button--secondary"
@@ -1607,11 +1872,11 @@ export function HomeClient() {
             <div className="studio-addsongs">
               <div className="studio-addsongs__row">
                 <label className="field">
-                  <span>YouTube Links</span>
+                  <span>YouTube Links or Playlist</span>
                   <textarea
                     className="textarea textarea--compact"
                     placeholder={
-                      "https://youtu.be/dQw4w9WgXcQ\nhttps://www.youtube.com/watch?v=3JWTaaS7LdU"
+                      "https://youtu.be/dQw4w9WgXcQ\nhttps://www.youtube.com/playlist?list=PL..."
                     }
                     value={importText}
                     onChange={(event) => setImportText(event.target.value)}
@@ -1627,8 +1892,9 @@ export function HomeClient() {
                 </button>
               </div>
               <p className="itunes-coverfield__hint">
-                Paste public YouTube links (one per line). Accepted formats:
-                youtu.be, youtube.com/watch, youtube.com/shorts, and raw video IDs.
+                Paste public YouTube links (one per line) or a playlist URL (up to 50 tracks).
+                Accepted formats: youtu.be, youtube.com/watch, youtube.com/playlist, youtube.com/shorts,
+                and raw video IDs.
               </p>
             </div>
 

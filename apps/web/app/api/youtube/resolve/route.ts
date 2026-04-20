@@ -3,7 +3,11 @@ import { NextResponse } from "next/server";
 import type { ImportedTrack } from "@burner/core";
 
 import { createRateLimiter, readClientKey } from "../../../../lib/rate-limit";
-import { resolveYouTubeTrack } from "../../../../lib/server/youtube";
+import {
+  fetchYouTubePlaylistVideoIds,
+  resolveYouTubeTrack,
+} from "../../../../lib/server/youtube";
+import { buildYouTubeWatchUrl, parseYouTubePlaylistId } from "../../../../lib/youtube";
 
 export const dynamic = "force-dynamic";
 
@@ -14,6 +18,7 @@ interface YouTubeResolvePayload {
 }
 
 const MAX_URLS_PER_REQUEST = 12;
+const MAX_PLAYLIST_EXPANSION = 50;
 
 const consumeToken = createRateLimiter({
   capacity: 20,
@@ -39,18 +44,53 @@ export async function POST(request: Request) {
       : body.url
         ? [body.url]
         : [];
-    const candidates = rawUrls
+    const rawCandidates = rawUrls
       .filter((value): value is string => typeof value === "string")
       .map((url) => url.trim())
       .filter(Boolean);
+
+    if (rawCandidates.length === 0) {
+      throw new Error("Paste at least one valid YouTube song link.");
+    }
+
+    const candidates: string[] = [];
+    const seenCandidates = new Set<string>();
+    let expandedFromPlaylist = false;
+
+    for (const candidate of rawCandidates) {
+      const playlistId = parseYouTubePlaylistId(candidate);
+      if (playlistId) {
+        expandedFromPlaylist = true;
+        const videoIds = await fetchYouTubePlaylistVideoIds(playlistId);
+        for (const videoId of videoIds) {
+          const url = buildYouTubeWatchUrl(videoId);
+          if (!seenCandidates.has(url)) {
+            seenCandidates.add(url);
+            candidates.push(url);
+          }
+          if (candidates.length >= MAX_PLAYLIST_EXPANSION) break;
+        }
+        if (candidates.length >= MAX_PLAYLIST_EXPANSION) break;
+        continue;
+      }
+
+      if (!seenCandidates.has(candidate)) {
+        seenCandidates.add(candidate);
+        candidates.push(candidate);
+      }
+    }
 
     if (candidates.length === 0) {
       throw new Error("Paste at least one valid YouTube song link.");
     }
 
-    if (candidates.length > MAX_URLS_PER_REQUEST) {
+    const limit = expandedFromPlaylist
+      ? MAX_PLAYLIST_EXPANSION
+      : MAX_URLS_PER_REQUEST;
+
+    if (candidates.length > limit) {
       throw new Error(
-        `Resolve up to ${MAX_URLS_PER_REQUEST} links at a time.`,
+        `Resolve up to ${limit} links at a time.`,
       );
     }
 

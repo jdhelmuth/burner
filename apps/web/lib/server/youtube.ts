@@ -9,6 +9,56 @@ import {
   parseYouTubeVideoId,
 } from "../youtube";
 
+const PLAYLIST_VIDEO_ID_PATTERN =
+  /"playlistVideoRenderer":\{"videoId":"([A-Za-z0-9_-]{11})"/g;
+const MAX_PLAYLIST_VIDEOS = 50;
+
+export async function fetchYouTubePlaylistVideoIds(
+  playlistId: string,
+): Promise<string[]> {
+  const response = await fetch(
+    `https://www.youtube.com/playlist?list=${encodeURIComponent(playlistId)}&hl=en`,
+    {
+      cache: "no-store",
+      headers: {
+        "Accept-Language": "en-US,en;q=0.9",
+        "User-Agent":
+          "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36",
+      },
+    },
+  );
+
+  if (!response.ok) {
+    throw new Error(
+      "Burner could not load that YouTube playlist. Make sure it is public.",
+    );
+  }
+
+  const html = await response.text();
+  const seen = new Set<string>();
+  const videoIds: string[] = [];
+
+  for (const match of html.matchAll(PLAYLIST_VIDEO_ID_PATTERN)) {
+    const id = match[1];
+    if (!id || seen.has(id)) {
+      continue;
+    }
+    seen.add(id);
+    videoIds.push(id);
+    if (videoIds.length >= MAX_PLAYLIST_VIDEOS) {
+      break;
+    }
+  }
+
+  if (videoIds.length === 0) {
+    throw new Error(
+      "Burner could not find any videos on that playlist. Is it public and has it got videos?",
+    );
+  }
+
+  return videoIds;
+}
+
 export async function resolveYouTubeTrack(rawValue: string) {
   const videoId = parseYouTubeVideoId(rawValue);
 

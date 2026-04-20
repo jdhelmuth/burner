@@ -864,6 +864,81 @@ hr {
   color: var(--ink);
 }
 
+.itunes-signin__form {
+  display: grid;
+  gap: 10px;
+}
+
+.itunes-signin__captcha {
+  display: grid;
+  gap: 8px;
+}
+
+.itunes-signin__captcha span {
+  font-size: var(--fs-sm);
+  color: var(--muted);
+}
+
+.itunes-signin__captcha-host {
+  min-height: 66px;
+}
+
+.itunes-signin__divider {
+  position: relative;
+  display: grid;
+  place-items: center;
+  margin: 4px 0;
+}
+
+.itunes-signin__divider::before {
+  content: "";
+  position: absolute;
+  top: 50%;
+  left: 0;
+  right: 0;
+  height: 1px;
+  background: var(--hairline);
+}
+
+.itunes-signin__divider span {
+  position: relative;
+  padding: 0 10px;
+  background: var(--surface);
+  font-family: var(--font-mono);
+  font-size: var(--fs-xs);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.itunes-signin__swap {
+  margin: 4px 0 0;
+  text-align: center;
+  font-size: var(--fs-sm);
+  color: var(--muted);
+}
+
+.itunes-signin__link {
+  padding: 0;
+  font: inherit;
+  color: var(--accent-deep);
+  background: none;
+  border: 0;
+  cursor: pointer;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  justify-self: start;
+}
+
+.itunes-signin__link:hover:not(:disabled) {
+  color: var(--accent);
+}
+
+.itunes-signin__link:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
 /* ============================================================
    Cover editor / cover field
    ============================================================ */
@@ -1748,6 +1823,36 @@ hr {
   gap: 6px;
 }
 
+.receiver-banner__share {
+  position: relative;
+  z-index: 1;
+  margin-top: 4px;
+  padding: 10px 22px;
+  font-size: var(--fs-sm);
+  font-weight: 600;
+  color: var(--ink);
+  background: var(--surface);
+  border: 1px solid var(--hairline-strong);
+  border-radius: 999px;
+  box-shadow: var(--shadow-1);
+  cursor: pointer;
+  transition:
+    transform 120ms ease,
+    box-shadow 120ms ease,
+    background 120ms ease;
+}
+
+.receiver-banner__share:hover:not(:disabled) {
+  transform: translateY(-1px);
+  box-shadow: var(--shadow-2);
+  background: var(--surface-alt);
+}
+
+.receiver-banner__share:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
 .receiver-toolbar__item {
   display: inline-flex;
   align-items: center;
@@ -2595,4 +2700,140 @@ hr {
     width: 40px;
     height: 40px;
   }
+}
+
+.my-burns {
+  max-width: 960px;
+  margin: 0 auto;
+  padding: 48px 24px 64px;
+  display: grid;
+  gap: 28px;
+}
+
+.my-burns__header {
+  display: grid;
+  gap: 6px;
+}
+
+.my-burns__back {
+  justify-self: start;
+  font-family: var(--font-mono);
+  font-size: var(--fs-xs);
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--muted);
+  text-decoration: none;
+}
+
+.my-burns__back:hover {
+  color: var(--ink);
+}
+
+.my-burns__header h1 {
+  margin: 0;
+  font-size: var(--fs-3xl);
+  letter-spacing: -0.01em;
+}
+
+.my-burns__subtitle {
+  margin: 0;
+  color: var(--muted);
+}
+
+.my-burns__empty {
+  padding: 32px;
+  text-align: center;
+  background: var(--surface);
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius-lg);
+  color: var(--muted);
+}
+
+.my-burns__empty a {
+  color: var(--accent-deep);
+}
+
+.my-burns__empty--error {
+  color: var(--danger);
+}
+
+.my-burns__list {
+  display: grid;
+  gap: 12px;
+  list-style: none;
+  padding: 0;
+  margin: 0;
+}
+
+.my-burns__item {
+  background: var(--surface);
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-1);
+  transition:
+    transform 120ms ease,
+    box-shadow 120ms ease;
+}
+
+.my-burns__item:hover {
+  transform: translateY(-1px);
+  box-shadow: var(--shadow-2);
+}
+
+.my-burns__itemlink {
+  display: grid;
+  grid-template-columns: 72px 1fr;
+  gap: 16px;
+  align-items: center;
+  padding: 14px 16px;
+  text-decoration: none;
+  color: inherit;
+}
+
+.my-burns__cover {
+  width: 72px;
+  height: 72px;
+  border-radius: var(--radius);
+  overflow: hidden;
+  background: linear-gradient(180deg, #f4f2ec, #dedbd1);
+  display: grid;
+  place-items: center;
+  font-weight: 700;
+  color: var(--muted);
+  font-size: 22px;
+}
+
+.my-burns__cover img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.my-burns__meta {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.my-burns__meta strong {
+  font-size: var(--fs-lg);
+  color: var(--ink);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.my-burns__meta span {
+  font-size: var(--fs-sm);
+  color: var(--muted);
+}
+
+.my-burns__shortcode {
+  font-family: var(--font-mono);
+  font-size: var(--fs-xs) !important;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--muted-soft) !important;
 }

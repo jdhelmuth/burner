@@ -1260,6 +1260,15 @@ export function ReceiverShell({ exchange }: { exchange: ReceiverExchange }) {
                 Burned by {exchange.burner.senderName}
               </span>
             </div>
+
+            <button
+              className="receiver-banner__share"
+              disabled={shareActionState === "sharing"}
+              onClick={() => void shareWithOthers()}
+              type="button"
+            >
+              {shareLabel}
+            </button>
           </header>
 
           <section className="receiver-media">
@@ -1415,14 +1424,6 @@ export function ReceiverShell({ exchange }: { exchange: ReceiverExchange }) {
                     Open on {providerLabel(currentVisibleProvider)}
                   </a>
                 ) : null}
-                <button
-                  className="receiver-transport__link"
-                  disabled={shareActionState === "sharing"}
-                  onClick={() => void shareWithOthers()}
-                  type="button"
-                >
-                  {shareLabel}
-                </button>
               </div>
             </div>
           </section>

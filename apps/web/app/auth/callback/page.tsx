@@ -6,9 +6,20 @@ import { useEffect, useMemo, useState } from "react";
 import { isSupportedOtpType, parseWebAuthCallbackUrl } from "../../../lib/auth-callback";
 import { getBrowserSupabaseClient } from "../../../lib/supabase";
 
+type View =
+  | { kind: "working"; message: string }
+  | { kind: "recovery"; message: string | null }
+  | { kind: "error"; message: string };
+
 export default function AuthCallbackPage() {
   const supabase = useMemo(() => getBrowserSupabaseClient(), []);
-  const [message, setMessage] = useState("Completing sign-in...");
+  const [view, setView] = useState<View>({
+    kind: "working",
+    message: "Completing sign-in...",
+  });
+  const [password, setPassword] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
+  const [busy, setBusy] = useState(false);
 
   useEffect(() => {
     let active = true;
@@ -16,6 +27,7 @@ export default function AuthCallbackPage() {
     async function completeAuth() {
       try {
         const params = parseWebAuthCallbackUrl(window.location.href);
+        const isRecovery = params.type === "recovery";
 
         if (params.error) {
           throw new Error(params.errorDescription ?? params.error);
@@ -52,17 +64,21 @@ export default function AuthCallbackPage() {
           }
         }
 
-        if (active) {
-          setMessage("Sign-in complete. Sending you back to the dashboard...");
-        }
+        if (!active) return;
 
-        window.location.replace("/");
-      } catch (error) {
-        if (!active) {
+        if (isRecovery) {
+          setView({ kind: "recovery", message: null });
           return;
         }
 
-        setMessage((error as Error).message);
+        setView({
+          kind: "working",
+          message: "Sign-in complete. Sending you back to the dashboard...",
+        });
+        window.location.replace("/");
+      } catch (error) {
+        if (!active) return;
+        setView({ kind: "error", message: (error as Error).message });
       }
     }
 
@@ -73,17 +89,86 @@ export default function AuthCallbackPage() {
     };
   }, [supabase]);
 
+  async function submitNewPassword(event: React.FormEvent) {
+    event.preventDefault();
+    if (password.length < 8) {
+      setView({
+        kind: "recovery",
+        message: "Use a password with at least 8 characters.",
+      });
+      return;
+    }
+    if (password !== confirmPassword) {
+      setView({ kind: "recovery", message: "Passwords do not match." });
+      return;
+    }
+
+    setBusy(true);
+    try {
+      const { error } = await supabase.auth.updateUser({ password });
+      if (error) throw error;
+      window.location.replace("/");
+    } catch (error) {
+      setView({ kind: "recovery", message: (error as Error).message });
+    } finally {
+      setBusy(false);
+    }
+  }
+
   return (
     <main className="app-shell">
       <section className="panel auth-shell">
         <span className="eyebrow">auth callback</span>
-        <h1 className="panel-title">Almost there.</h1>
-        <p className="muted-copy">{message}</p>
-        <div className="button-row">
-          <Link className="button button--secondary" href="/">
-            Back to dashboard
-          </Link>
-        </div>
+        <h1 className="panel-title">
+          {view.kind === "recovery" ? "Set a new password" : "Almost there."}
+        </h1>
+
+        {view.kind === "recovery" ? (
+          <form className="itunes-signin__form" onSubmit={submitNewPassword}>
+            <label className="field">
+              <span>New password</span>
+              <input
+                autoComplete="new-password"
+                className="input"
+                minLength={8}
+                placeholder="At least 8 characters"
+                type="password"
+                value={password}
+                onChange={(event) => setPassword(event.target.value)}
+              />
+            </label>
+            <label className="field">
+              <span>Confirm password</span>
+              <input
+                autoComplete="new-password"
+                className="input"
+                minLength={8}
+                type="password"
+                value={confirmPassword}
+                onChange={(event) => setConfirmPassword(event.target.value)}
+              />
+            </label>
+            <button
+              className="button button--primary"
+              disabled={busy}
+              type="submit"
+            >
+              {busy ? "Saving..." : "Update Password"}
+            </button>
+            {view.message ? (
+              <p className="status-message">{view.message}</p>
+            ) : null}
+          </form>
+        ) : (
+          <>
+            <p className="muted-copy">{view.message}</p>
+            <div className="button-row">
+              <Link className="button button--secondary" href="/">
+                Back to dashboard
+              </Link>
+            </div>
+          </>
+        )}
       </section>
     </main>
   );

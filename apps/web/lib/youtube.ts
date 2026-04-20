@@ -1,6 +1,7 @@
 import type { ImportedTrack } from "@burner/core";
 
 const YOUTUBE_VIDEO_ID = /^[A-Za-z0-9_-]{11}$/;
+const YOUTUBE_PLAYLIST_ID = /^[A-Za-z0-9_-]{13,42}$/;
 const YOUTUBE_TITLE_SPLIT = /\s[-–—:|]\s/;
 const DISPOSABLE_YOUTUBE_TITLE_MARKERS = [
   "official music video",
@@ -29,6 +30,37 @@ function normalizeYouTubeVideoId(candidate: string | null | undefined) {
   }
 
   return trimmed;
+}
+
+export function parseYouTubePlaylistId(rawValue: string) {
+  const trimmed = rawValue.trim();
+  if (!trimmed) {
+    return null;
+  }
+
+  let url: URL;
+  try {
+    url = new URL(trimmed);
+  } catch {
+    return null;
+  }
+
+  const hostname = url.hostname.toLowerCase().replace(/^www\./, "");
+  if (!["youtube.com", "music.youtube.com", "m.youtube.com", "youtu.be"].includes(hostname)) {
+    return null;
+  }
+
+  const listParam = url.searchParams.get("list");
+  if (!listParam) {
+    return null;
+  }
+
+  const normalized = listParam.trim();
+  if (!YOUTUBE_PLAYLIST_ID.test(normalized)) {
+    return null;
+  }
+
+  return normalized;
 }
 
 export function parseYouTubeVideoId(rawValue: string) {
@@ -283,6 +315,7 @@ export function buildYouTubeThumbnailUrl(videoId: string) {
 
 export function extractYouTubeImportCandidates(rawValue: string) {
   const seenVideoIds = new Set<string>();
+  const seenPlaylistIds = new Set<string>();
 
   return rawValue
     .split(/\r?\n/)
@@ -293,6 +326,13 @@ export function extractYouTubeImportCandidates(rawValue: string) {
       return tokens ?? [];
     })
     .filter((candidate) => {
+      const playlistId = parseYouTubePlaylistId(candidate);
+      if (playlistId) {
+        if (seenPlaylistIds.has(playlistId)) return false;
+        seenPlaylistIds.add(playlistId);
+        return true;
+      }
+
       const videoId = parseYouTubeVideoId(candidate);
       if (!videoId || seenVideoIds.has(videoId)) {
         return false;
