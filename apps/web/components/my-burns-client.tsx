@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useEffect, useState } from "react";
 import type { Session } from "@supabase/supabase-js";
 
+import { getBurnerShareLink } from "../lib/burner-api";
 import { runtimeFlags } from "../lib/env";
 import { getBrowserSupabaseClient } from "../lib/supabase";
 
@@ -20,6 +21,7 @@ type BurnerRow = {
 
 type ShareLinkRow = {
   burner_id: string;
+  created_at: string;
   short_code: string;
   slug: string;
 };
@@ -29,22 +31,42 @@ type LoadState =
   | { kind: "ready"; burners: BurnerRow[]; shareLinks: Record<string, ShareLinkRow> }
   | { kind: "error"; message: string };
 
-function formatDate(iso: string) {
+function formatCreatedAt(iso: string) {
   try {
-    return new Date(iso).toLocaleDateString(undefined, {
+    return new Date(iso).toLocaleString(undefined, {
       year: "numeric",
       month: "short",
       day: "numeric",
+      hour: "numeric",
+      minute: "2-digit",
     });
   } catch {
     return iso;
   }
 }
 
+function omitShareLink(
+  shareLinks: Record<string, ShareLinkRow>,
+  burnerId: string,
+) {
+  const next = { ...shareLinks };
+  delete next[burnerId];
+  return next;
+}
+
 export function MyBurnsClient() {
   const [session, setSession] = useState<Session | null>(null);
   const [authReady, setAuthReady] = useState(false);
   const [state, setState] = useState<LoadState>({ kind: "loading" });
+  const [pendingAction, setPendingAction] = useState<{
+    burnerId: string;
+    kind: "deleting" | "opening";
+  } | null>(null);
+  const [actionError, setActionError] = useState<string | null>(null);
+  const openingBurnerId =
+    pendingAction?.kind === "opening" ? pendingAction.burnerId : null;
+  const deletingBurnerId =
+    pendingAction?.kind === "deleting" ? pendingAction.burnerId : null;
 
   useEffect(() => {
     if (!runtimeFlags.isSupabaseConfigured) {
@@ -78,6 +100,7 @@ export function MyBurnsClient() {
 
     async function load() {
       setState({ kind: "loading" });
+      setActionError(null);
 
       const { data: burners, error } = await supabase
         .from("burners")
@@ -99,11 +122,12 @@ export function MyBurnsClient() {
       if (rows.length > 0) {
         const { data: links } = await supabase
           .from("burner_share_links")
-          .select("burner_id, short_code, slug")
+          .select("burner_id, created_at, short_code, slug")
           .in(
             "burner_id",
             rows.map((r) => r.id),
-          );
+          )
+          .order("created_at", { ascending: true });
 
         if (links) {
           for (const link of links as ShareLinkRow[]) {
@@ -121,6 +145,59 @@ export function MyBurnsClient() {
       cancelled = true;
     };
   }, [authReady, session]);
+
+  async function openBurnerShare(burnerId: string) {
+    setActionError(null);
+    setPendingAction({ burnerId, kind: "opening" });
+
+    try {
+      const { shareUrl } = await getBurnerShareLink({ burnerId });
+      window.location.assign(shareUrl);
+    } catch (error) {
+      setActionError(
+        error instanceof Error
+          ? error.message
+          : "Burner could not open that share page.",
+      );
+      setPendingAction(null);
+    }
+  }
+
+  async function deleteBurner(burner: BurnerRow) {
+    const burnerLabel = burner.title.trim() || "Untitled Burner";
+    const confirmed = window.confirm(
+      `Delete "${burnerLabel}" from your burn history? This also removes its share links.`,
+    );
+
+    if (!confirmed) {
+      return;
+    }
+
+    setActionError(null);
+    setPendingAction({ burnerId: burner.id, kind: "deleting" });
+
+    const supabase = getBrowserSupabaseClient();
+    const { error } = await supabase.from("burners").delete().eq("id", burner.id);
+
+    if (error) {
+      setActionError(error.message);
+      setPendingAction(null);
+      return;
+    }
+
+    setState((current) => {
+      if (current.kind !== "ready") {
+        return current;
+      }
+
+      return {
+        kind: "ready",
+        burners: current.burners.filter((entry) => entry.id !== burner.id),
+        shareLinks: omitShareLink(current.shareLinks, burner.id),
+      };
+    });
+    setPendingAction(null);
+  }
 
   if (!runtimeFlags.isSupabaseConfigured) {
     return (
@@ -182,6 +259,10 @@ export function MyBurnsClient() {
         </p>
       </header>
 
+      {actionError ? (
+        <p className="my-burns__empty my-burns__empty--error">{actionError}</p>
+      ) : null}
+
       {state.kind === "loading" ? (
         <p className="my-burns__empty">Loading your burns...</p>
       ) : state.kind === "error" ? (
@@ -196,36 +277,53 @@ export function MyBurnsClient() {
         <ul className="my-burns__list">
           {state.burners.map((burner) => {
             const link = state.shareLinks[burner.id];
-            const href = link ? `/b/${link.slug}` : `/b/${burner.slug}`;
             return (
               <li className="my-burns__item" key={burner.id}>
-                <Link className="my-burns__itemlink" href={href}>
-                  <div className="my-burns__cover">
-                    {burner.cover_image_url ? (
-                      <img
-                        alt=""
-                        src={burner.cover_image_url}
-                        loading="lazy"
-                      />
-                    ) : (
-                      <span>{burner.title.slice(0, 1) || "B"}</span>
-                    )}
-                  </div>
-                  <div className="my-burns__meta">
-                    <strong>{burner.title}</strong>
-                    <span>
-                      {burner.total_tracks} track
-                      {burner.total_tracks === 1 ? "" : "s"} •{" "}
-                      {formatDate(burner.created_at)}
-                      {burner.is_revoked ? " • Revoked" : ""}
-                    </span>
-                    {link ? (
-                      <span className="my-burns__shortcode">
-                        {link.short_code}
+                <div className="my-burns__itemrow">
+                  <button
+                    className="my-burns__itemlink"
+                    disabled={pendingAction !== null}
+                    onClick={() => void openBurnerShare(burner.id)}
+                    type="button"
+                  >
+                    <div className="my-burns__cover">
+                      {burner.cover_image_url ? (
+                        <img
+                          alt=""
+                          src={burner.cover_image_url}
+                          loading="lazy"
+                        />
+                      ) : (
+                        <span>{burner.title.slice(0, 1) || "B"}</span>
+                      )}
+                    </div>
+                    <div className="my-burns__meta">
+                      <strong>{burner.title}</strong>
+                      <span>
+                        {burner.total_tracks} track
+                        {burner.total_tracks === 1 ? "" : "s"}
+                        {burner.is_revoked ? " • Revoked" : ""}
                       </span>
-                    ) : null}
-                  </div>
-                </Link>
+                      <span>Created {formatCreatedAt(burner.created_at)}</span>
+                      {link ? (
+                        <span className="my-burns__shortcode">
+                          {openingBurnerId === burner.id
+                            ? "Opening..."
+                            : link.short_code}
+                        </span>
+                      ) : null}
+                    </div>
+                  </button>
+
+                  <button
+                    className="button my-burns__delete"
+                    disabled={pendingAction !== null}
+                    onClick={() => void deleteBurner(burner)}
+                    type="button"
+                  >
+                    {deletingBurnerId === burner.id ? "Deleting..." : "Delete"}
+                  </button>
+                </div>
               </li>
             );
           })}

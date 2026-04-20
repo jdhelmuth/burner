@@ -19,11 +19,17 @@ import {
 } from "@supabase/supabase-js";
 
 import { CoverArtField } from "./cover-art-field";
+import { ShareDialog } from "./share-dialog";
 import { defaultDraft } from "../lib/provider-catalog";
 import {
   buildInAppPreviewEmbedUrl,
   supportsInAppPreview,
 } from "../lib/track-preview";
+import {
+  buildShareEmailHref,
+  canUseWebShare,
+  copyText,
+} from "../lib/share-utils";
 import { env, runtimeFlags } from "../lib/env";
 import { getBrowserSupabaseClient } from "../lib/supabase";
 import { loadYouTubeIframeApi } from "../lib/youtube-player";
@@ -200,23 +206,6 @@ function buildLocalPublishResult(draft: BurnerDraft): PublishResult {
   };
 }
 
-function buildShareEmailHref(input: {
-  senderName: string;
-  shareUrl: string;
-  title: string;
-}) {
-  const normalizedTitle = input.title.trim() || "a Burner CD";
-  const normalizedSender = input.senderName.trim() || "Someone";
-  const subject = `Listen to ${normalizedTitle}`;
-  const body = [
-    `${normalizedSender} burned you ${normalizedTitle} on Burner.`,
-    "",
-    input.shareUrl,
-  ].join("\n");
-
-  return `mailto:?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
-}
-
 function deriveSenderName(session: Session | null) {
   if (!session) {
     return defaultDraft.senderName;
@@ -287,6 +276,7 @@ export function HomeClient() {
   const [authMode, setAuthMode] = useState<"signin" | "signup" | "forgot">(
     "signin",
   );
+  const [showAuthDialog, setShowAuthDialog] = useState(false);
   const [captchaToken, setCaptchaToken] = useState("");
   const [turnstileReady, setTurnstileReady] = useState(false);
   const [authMessage, setAuthMessage] = useState<string | null>(null);
@@ -381,6 +371,12 @@ export function HomeClient() {
       }
 
       setSession(nextSession);
+      if (nextSession) {
+        setShowAuthDialog(false);
+        setAuthMode("signin");
+        setAuthMessage(null);
+        setPassword("");
+      }
       clearPublishedShare();
       setSenderName((current) => {
         const normalized = current.trim();
@@ -401,6 +397,21 @@ export function HomeClient() {
   useEffect(() => {
     previewTransportRef.current = previewTransport;
   }, [previewTransport]);
+
+  useEffect(() => {
+    if (!showAuthDialog) {
+      return;
+    }
+
+    function handleKeyDown(event: KeyboardEvent) {
+      if (event.key === "Escape") {
+        setShowAuthDialog(false);
+      }
+    }
+
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [showAuthDialog]);
 
   useEffect(() => {
     if (
@@ -442,21 +453,6 @@ export function HomeClient() {
       turnstileWidgetIdRef.current = null;
     };
   }, [turnstileRequired, turnstileReady]);
-
-  useEffect(() => {
-    if (!showShareDialog) {
-      return;
-    }
-
-    function handleKeyDown(event: KeyboardEvent) {
-      if (event.key === "Escape") {
-        setShowShareDialog(false);
-      }
-    }
-
-    window.addEventListener("keydown", handleKeyDown);
-    return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [showShareDialog]);
 
   useEffect(() => {
     const audio = previewAudioRef.current;
@@ -993,8 +989,9 @@ export function HomeClient() {
       }
 
       await stopCurrentPreview({ clearSelection: true });
-      setTracks([]);
-      setImportText("");
+      setAuthMode("signin");
+      setAuthMessage(null);
+      setPassword("");
     });
   }
 
@@ -1269,11 +1266,6 @@ export function HomeClient() {
   }
 
   async function publishBurner() {
-    if (runtimeFlags.isSupabaseConfigured && !session) {
-      setAuthMessage("Sign in before publishing a burner.");
-      return;
-    }
-
     if (!title.trim() || !senderName.trim()) {
       setAuthMessage("Give the disc a title and a sender name first.");
       return;
@@ -1351,7 +1343,7 @@ export function HomeClient() {
     }
 
     try {
-      await navigator.clipboard.writeText(publishResult.shareUrl);
+      await copyText(publishResult.shareUrl);
       setCopiedState("copied");
       window.setTimeout(() => setCopiedState("idle"), 2000);
     } catch {
@@ -1362,7 +1354,7 @@ export function HomeClient() {
   }
 
   async function sharePublishedBurner() {
-    if (!publishResult || typeof navigator.share !== "function") {
+    if (!publishResult || !canUseWebShare()) {
       return;
     }
 
@@ -1384,15 +1376,6 @@ export function HomeClient() {
     }
   }
 
-  function handleShareDialogBackdropClick(
-    target: EventTarget | null,
-    currentTarget: EventTarget | null,
-  ) {
-    if (target === currentTarget) {
-      setShowShareDialog(false);
-    }
-  }
-
   const activePlaylistPreviewIndex = previewTrackId
     ? tracks.findIndex((track) => track.providerTrackId === previewTrackId)
     : -1;
@@ -1406,6 +1389,37 @@ export function HomeClient() {
   const browserOnlyModeMessage = browserOnlyMode
     ? "Browser-only publishing is active on this deployment. Burner will pack the mixtape into the share link itself, so extra-large playlists can be too long to send."
     : null;
+  const donationSupportBox = runtimeFlags.hasDeveloperDonation
+    ? {
+        actions: [
+          env.developerDonationUrl.trim()
+            ? {
+                href: env.developerDonationUrl.trim(),
+                label: env.developerDonationLabel.trim() || "Tip the developer",
+              }
+            : null,
+          env.developerDonationSecondaryUrl.trim()
+            ? {
+                href: env.developerDonationSecondaryUrl.trim(),
+                label:
+                  env.developerDonationSecondaryLabel.trim() ||
+                  "Other donation options",
+              }
+            : null,
+        ].filter(
+          (
+            action,
+          ): action is {
+            href: string;
+            label: string;
+          } => Boolean(action),
+        ),
+        copy:
+          env.developerDonationMessage.trim() ||
+          "Optional, but appreciated if you want to help fund Burner development.",
+        title: "Support Burner",
+      }
+    : undefined;
   const shareDialogEmailHref = publishResult
     ? buildShareEmailHref({
         senderName,
@@ -1413,184 +1427,214 @@ export function HomeClient() {
         title,
       })
     : "";
+  const historyUpsellMessage =
+    runtimeFlags.isSupabaseConfigured && !session
+      ? "Burn links without an account. Want your burn history later? Create an account, then sign in from the top right."
+      : null;
 
-  if (runtimeFlags.isSupabaseConfigured && !session) {
-    return (
-      <main className="app-shell itunes-shell">
-        {turnstileRequired ? (
-          <Script
-            src="https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit"
-            strategy="afterInteractive"
-            onLoad={() => setTurnstileReady(true)}
-          />
-        ) : null}
-        <section className="itunes-window itunes-window--signin">
-          <header className="itunes-titlebar">
-            <div aria-hidden="true" className="itunes-traffic">
-              <span />
-              <span />
-              <span />
-            </div>
-            <strong className="itunes-title">Burner</strong>
-            <div className="itunes-search-shell" />
-          </header>
-
-          <div className="itunes-signin">
-            <div className="itunes-signin__card">
-              <h1>
-                {authMode === "signup"
-                  ? "Create Account"
-                  : authMode === "forgot"
-                    ? "Reset Password"
-                    : "Sign In"}
-              </h1>
-              <p className="muted-copy">
-                {authMode === "signup"
-                  ? "Make an account to save your burns and pick up where you left off."
-                  : authMode === "forgot"
-                    ? "Enter your email and we'll send a link to set a new password."
-                    : "Sign in to build mixtapes and see your burn history."}
-              </p>
-
-              <form
-                className="itunes-signin__form"
-                onSubmit={(event) => {
-                  event.preventDefault();
-                  if (authMode === "signup") void handleSignUp();
-                  else if (authMode === "forgot") void handleForgotPassword();
-                  else void handleSignInPassword();
-                }}
-              >
-                {authMode === "signup" ? (
-                  <label className="field">
-                    <span>Display name</span>
-                    <input
-                      autoComplete="name"
-                      className="input"
-                      placeholder="Skye"
-                      value={signupDisplayName}
-                      onChange={(event) =>
-                        setSignupDisplayName(event.target.value)
-                      }
-                    />
-                  </label>
-                ) : null}
-
-                <label className="field">
-                  <span>Email</span>
-                  <input
-                    autoComplete="email"
-                    className="input"
-                    inputMode="email"
-                    placeholder="you@burner.fm"
-                    type="email"
-                    value={email}
-                    onChange={(event) => setEmail(event.target.value)}
-                  />
-                </label>
-
-                {authMode !== "forgot" ? (
-                  <label className="field">
-                    <span>Password</span>
-                    <input
-                      autoComplete={
-                        authMode === "signup"
-                          ? "new-password"
-                          : "current-password"
-                      }
-                      className="input"
-                      minLength={authMode === "signup" ? 8 : undefined}
-                      placeholder={
-                        authMode === "signup"
-                          ? "At least 8 characters"
-                          : "Your password"
-                      }
-                      type="password"
-                      value={password}
-                      onChange={(event) => setPassword(event.target.value)}
-                    />
-                  </label>
-                ) : null}
-
-                {turnstileRequired ? (
-                  <div className="itunes-signin__captcha">
-                    <span>Security check</span>
-                    <div
-                      className="itunes-signin__captcha-host"
-                      ref={turnstileHostRef}
-                    />
-                  </div>
-                ) : null}
-
-                <button
-                  className="button button--primary"
-                  disabled={
-                    authBusy !== null || (turnstileRequired && !captchaToken)
-                  }
-                  type="submit"
-                >
+  return (
+    <main className="app-shell itunes-shell">
+      {turnstileRequired ? (
+        <Script
+          src="https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit"
+          strategy="afterInteractive"
+          onLoad={() => setTurnstileReady(true)}
+        />
+      ) : null}
+      {showAuthDialog && runtimeFlags.isSupabaseConfigured && !session ? (
+        <div
+          aria-labelledby="auth-dialog-title"
+          aria-modal="true"
+          className="share-dialog auth-dialog"
+          onClick={(event) => {
+            if (event.target === event.currentTarget) {
+              setShowAuthDialog(false);
+            }
+          }}
+          role="dialog"
+        >
+          <div className="share-dialog__panel auth-dialog__panel">
+            <div className="auth-dialog__header">
+              <div className="stack-xs">
+                <strong className="share-dialog__eyebrow">Account access</strong>
+                <h2 className="share-dialog__title" id="auth-dialog-title">
                   {authMode === "signup"
-                    ? authBusy === "signup"
-                      ? "Creating..."
-                      : "Create Account"
+                    ? "Create Account"
                     : authMode === "forgot"
-                      ? authBusy === "forgot"
-                        ? "Sending..."
-                        : "Send Reset Link"
-                      : authBusy === "signin"
-                        ? "Signing in..."
-                        : "Sign In"}
-                </button>
-
-                {authMode === "signin" ? (
-                  <button
-                    className="itunes-signin__link"
-                    disabled={authBusy !== null}
-                    onClick={() => {
-                      setAuthMessage(null);
-                      setAuthMode("forgot");
-                    }}
-                    type="button"
-                  >
-                    Forgot password?
-                  </button>
-                ) : null}
-              </form>
-
-              <div className="itunes-signin__divider">
-                <span>or</span>
+                      ? "Reset Password"
+                      : "Sign In"}
+                </h2>
+                <p className="share-dialog__copy">
+                  {authMode === "signup"
+                    ? "Make an account to save your burns and reopen them from history later."
+                    : authMode === "forgot"
+                      ? "Enter your email and Burner will send a password reset link."
+                      : "Sign in to save burner history and reopen CDs you already burned."}
+                </p>
               </div>
-
               <button
                 className="button button--secondary"
-                disabled={authBusy !== null}
-                onClick={() => handleOAuth("google")}
+                onClick={() => setShowAuthDialog(false)}
                 type="button"
               >
-                {authBusy === "google"
-                  ? "Redirecting..."
-                  : "Continue with Google"}
+                Close
               </button>
+            </div>
 
-              <p className="itunes-signin__swap">
-                {authMode === "signin" ? (
-                  <>
-                    New to Burner?{" "}
+            <div className="itunes-signin auth-dialog__body">
+              <div className="itunes-signin__card">
+                <form
+                  className="itunes-signin__form"
+                  onSubmit={(event) => {
+                    event.preventDefault();
+                    if (authMode === "signup") void handleSignUp();
+                    else if (authMode === "forgot") void handleForgotPassword();
+                    else void handleSignInPassword();
+                  }}
+                >
+                  {authMode === "signup" ? (
+                    <label className="field">
+                      <span>Display name</span>
+                      <input
+                        autoComplete="name"
+                        className="input"
+                        placeholder="Skye"
+                        value={signupDisplayName}
+                        onChange={(event) =>
+                          setSignupDisplayName(event.target.value)
+                        }
+                      />
+                    </label>
+                  ) : null}
+
+                  <label className="field">
+                    <span>Email</span>
+                    <input
+                      autoComplete="email"
+                      className="input"
+                      inputMode="email"
+                      placeholder="you@burner.fm"
+                      type="email"
+                      value={email}
+                      onChange={(event) => setEmail(event.target.value)}
+                    />
+                  </label>
+
+                  {authMode !== "forgot" ? (
+                    <label className="field">
+                      <span>Password</span>
+                      <input
+                        autoComplete={
+                          authMode === "signup"
+                            ? "new-password"
+                            : "current-password"
+                        }
+                        className="input"
+                        minLength={authMode === "signup" ? 8 : undefined}
+                        placeholder={
+                          authMode === "signup"
+                            ? "At least 8 characters"
+                            : "Your password"
+                        }
+                        type="password"
+                        value={password}
+                        onChange={(event) => setPassword(event.target.value)}
+                      />
+                    </label>
+                  ) : null}
+
+                  {turnstileRequired ? (
+                    <div className="itunes-signin__captcha">
+                      <span>Security check</span>
+                      <div
+                        className="itunes-signin__captcha-host"
+                        ref={turnstileHostRef}
+                      />
+                    </div>
+                  ) : null}
+
+                  <button
+                    className="button button--primary"
+                    disabled={
+                      authBusy !== null || (turnstileRequired && !captchaToken)
+                    }
+                    type="submit"
+                  >
+                    {authMode === "signup"
+                      ? authBusy === "signup"
+                        ? "Creating..."
+                        : "Create Account"
+                      : authMode === "forgot"
+                        ? authBusy === "forgot"
+                          ? "Sending..."
+                          : "Send Reset Link"
+                        : authBusy === "signin"
+                          ? "Signing in..."
+                          : "Sign In"}
+                  </button>
+
+                  {authMode === "signin" ? (
                     <button
                       className="itunes-signin__link"
                       disabled={authBusy !== null}
                       onClick={() => {
                         setAuthMessage(null);
-                        setAuthMode("signup");
+                        setAuthMode("forgot");
                       }}
                       type="button"
                     >
-                      Create an account
+                      Forgot password?
                     </button>
-                  </>
-                ) : authMode === "signup" ? (
-                  <>
-                    Already have an account?{" "}
+                  ) : null}
+                </form>
+
+                <div className="itunes-signin__divider">
+                  <span>or</span>
+                </div>
+
+                <button
+                  className="button button--secondary"
+                  disabled={authBusy !== null}
+                  onClick={() => handleOAuth("google")}
+                  type="button"
+                >
+                  {authBusy === "google"
+                    ? "Redirecting..."
+                    : "Continue with Google"}
+                </button>
+
+                <p className="itunes-signin__swap">
+                  {authMode === "signin" ? (
+                    <>
+                      New to Burner?{" "}
+                      <button
+                        className="itunes-signin__link"
+                        disabled={authBusy !== null}
+                        onClick={() => {
+                          setAuthMessage(null);
+                          setAuthMode("signup");
+                        }}
+                        type="button"
+                      >
+                        Create an account
+                      </button>
+                    </>
+                  ) : authMode === "signup" ? (
+                    <>
+                      Already have an account?{" "}
+                      <button
+                        className="itunes-signin__link"
+                        disabled={authBusy !== null}
+                        onClick={() => {
+                          setAuthMessage(null);
+                          setAuthMode("signin");
+                        }}
+                        type="button"
+                      >
+                        Sign in
+                      </button>
+                    </>
+                  ) : (
                     <button
                       className="itunes-signin__link"
                       disabled={authBusy !== null}
@@ -1600,36 +1644,19 @@ export function HomeClient() {
                       }}
                       type="button"
                     >
-                      Sign in
+                      ← Back to sign in
                     </button>
-                  </>
-                ) : (
-                  <button
-                    className="itunes-signin__link"
-                    disabled={authBusy !== null}
-                    onClick={() => {
-                      setAuthMessage(null);
-                      setAuthMode("signin");
-                    }}
-                    type="button"
-                  >
-                    ← Back to sign in
-                  </button>
-                )}
-              </p>
+                  )}
+                </p>
 
-              {authMessage ? (
-                <p className="status-message">{authMessage}</p>
-              ) : null}
+                {authMessage ? (
+                  <p className="status-message">{authMessage}</p>
+                ) : null}
+              </div>
             </div>
           </div>
-        </section>
-      </main>
-    );
-  }
-
-  return (
-    <main className="app-shell itunes-shell">
+        </div>
+      ) : null}
       <section className="itunes-window">
         <header className="studio-header">
           <div className="studio-header__copy">
@@ -1649,7 +1676,7 @@ export function HomeClient() {
                 My Burns
               </Link>
             ) : null}
-            {runtimeFlags.isSupabaseConfigured ? (
+            {runtimeFlags.isSupabaseConfigured && session ? (
               <button
                 className="button button--secondary"
                 disabled={authBusy !== null}
@@ -1657,6 +1684,20 @@ export function HomeClient() {
                 type="button"
               >
                 Sign Out
+              </button>
+            ) : null}
+            {runtimeFlags.isSupabaseConfigured && !session ? (
+              <button
+                className="button button--secondary"
+                disabled={authBusy !== null}
+                onClick={() => {
+                  setAuthMessage(null);
+                  setAuthMode("signin");
+                  setShowAuthDialog(true);
+                }}
+                type="button"
+              >
+                Sign In
               </button>
             ) : null}
           </div>
@@ -1689,98 +1730,26 @@ export function HomeClient() {
             {browserOnlyModeMessage}
           </p>
         ) : null}
+        {historyUpsellMessage ? (
+          <p className="studio-auth-note">{historyUpsellMessage}</p>
+        ) : null}
 
         {showShareDialog && publishResult ? (
-          <div
-            aria-labelledby="share-dialog-title"
-            aria-modal="true"
-            className="share-dialog"
-            onClick={(event) =>
-              handleShareDialogBackdropClick(event.target, event.currentTarget)
+          <ShareDialog
+            copied={copiedState === "copied"}
+            emailHref={shareDialogEmailHref}
+            feedback={shareFeedback}
+            itemCountLabel={`${tracks.length} track${tracks.length === 1 ? "" : "s"}`}
+            onClose={() => setShowShareDialog(false)}
+            onCopy={() => void copyShareUrl()}
+            onSystemShare={
+              canUseWebShare() ? () => sharePublishedBurner() : undefined
             }
-            role="dialog"
-          >
-            <div className="share-dialog__panel">
-              <div className="share-dialog__header">
-                <div className="stack-xs">
-                  <strong className="share-dialog__eyebrow">
-                    Burner ready to send
-                  </strong>
-                  <h2 className="share-dialog__title" id="share-dialog-title">
-                    Share “{title || "Untitled Burner"}”
-                  </h2>
-                  <p className="share-dialog__copy">
-                    The link is live. Copy it, open your mail app, or use the
-                    system share sheet.
-                  </p>
-                </div>
-                <button
-                  className="button button--secondary"
-                  onClick={() => setShowShareDialog(false)}
-                  type="button"
-                >
-                  Close
-                </button>
-              </div>
-
-              <div className="share-dialog__body">
-                <label className="field">
-                  <span>Share Link</span>
-                  <input
-                    aria-label="Share link"
-                    className="input share-dialog__input"
-                    onFocus={(event) => event.currentTarget.select()}
-                    readOnly
-                    value={publishResult.shareUrl}
-                  />
-                </label>
-
-                <div className="share-dialog__meta">
-                  <span>Short code {publishResult.shortCode}</span>
-                  <span>{tracks.length} tracks</span>
-                </div>
-
-                <div className="button-row share-dialog__actions">
-                  <button
-                    className="button button--primary"
-                    onClick={copyShareUrl}
-                    type="button"
-                  >
-                    {copiedState === "copied" ? "Copied" : "Copy Link"}
-                  </button>
-                  <a
-                    className="button button--secondary"
-                    href={shareDialogEmailHref}
-                  >
-                    Send via Email
-                  </a>
-                  {typeof navigator.share === "function" ? (
-                    <button
-                      className="button button--secondary"
-                      onClick={() => void sharePublishedBurner()}
-                      type="button"
-                    >
-                      Share…
-                    </button>
-                  ) : null}
-                  <a
-                    className="button button--secondary"
-                    href={publishResult.shareUrl}
-                    rel="noreferrer"
-                    target="_blank"
-                  >
-                    Open Link
-                  </a>
-                </div>
-
-                {shareFeedback ? (
-                  <p className="status-message status-message--compact">
-                    {shareFeedback}
-                  </p>
-                ) : null}
-              </div>
-            </div>
-          </div>
+            shareUrl={publishResult.shareUrl}
+            shortCode={publishResult.shortCode}
+            supportBox={donationSupportBox}
+            title={title}
+          />
         ) : null}
 
         <div className="itunes-layout">

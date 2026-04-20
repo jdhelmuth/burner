@@ -128,3 +128,45 @@ export async function completeTrackUnlock(input: {
     nextTrack?: RevealedTrack;
   };
 }
+
+export async function createBurnerShareLink(input: { burnerId: string }) {
+  const supabase = getBrowserSupabaseClient();
+  const { data, error } = await supabase.functions.invoke(
+    "create-burner-share-link",
+    {
+      body: input,
+    },
+  );
+
+  if (error) {
+    throw error;
+  }
+
+  return data as {
+    burnerId: string;
+    shareUrl: string;
+    shortCode: string;
+    slug: string;
+  };
+}
+
+export async function getBurnerShareLink(input: { burnerId: string }) {
+  const supabase = getBrowserSupabaseClient();
+  const { data, error } = await supabase.functions.invoke(
+    "get-burner-share-link",
+    {
+      body: input,
+    },
+  );
+
+  if (error) {
+    throw error;
+  }
+
+  return data as {
+    burnerId: string;
+    shareUrl: string;
+    shortCode: string;
+    slug: string;
+  };
+}

@@ -17,12 +17,18 @@ import {
   providerLabel,
 } from "../lib/receiver-helpers";
 import { readReceiverState, writeReceiverState } from "../lib/receiver-state";
+import {
+  buildShareEmailHref,
+  canUseWebShare,
+  copyText,
+} from "../lib/share-utils";
 import { loadYouTubeIframeApi } from "../lib/youtube-player";
 import {
   normalizeYouTubeTrackMetadata,
   parseYouTubeVideoId,
 } from "../lib/youtube";
 import { ReceiverIntroBanner } from "./receiver-intro-banner";
+import { ShareDialog } from "./share-dialog";
 
 type ReceiverExchange = ShareExchangeResult & {
   localTracks?: ImportedTrack[];
@@ -156,29 +162,6 @@ function hydrateFromStorage(exchange: ReceiverExchange) {
   };
 }
 
-async function copyText(text: string) {
-  if (navigator.clipboard?.writeText) {
-    await navigator.clipboard.writeText(text);
-    return;
-  }
-
-  const textarea = document.createElement("textarea");
-  textarea.value = text;
-  textarea.setAttribute("readonly", "");
-  textarea.style.position = "fixed";
-  textarea.style.opacity = "0";
-  textarea.style.pointerEvents = "none";
-  document.body.appendChild(textarea);
-  textarea.select();
-
-  const copied = document.execCommand("copy");
-  document.body.removeChild(textarea);
-
-  if (!copied) {
-    throw new Error("Copy failed");
-  }
-}
-
 export function ReceiverShell({ exchange }: { exchange: ReceiverExchange }) {
   const hydrated = useMemo(() => hydrateFromStorage(exchange), [exchange]);
   const normalizedFirstTrack = useMemo(
@@ -235,7 +218,11 @@ export function ReceiverShell({ exchange }: { exchange: ReceiverExchange }) {
     number | null
   >(null);
   const [showIntro, setShowIntro] = useState(false);
-  const [shareActionState, setShareActionState] = useState<
+  const [receiverShareDialogOpen, setReceiverShareDialogOpen] = useState(false);
+  const [receiverShareFeedback, setReceiverShareFeedback] = useState<
+    string | null
+  >(null);
+  const [receiverShareState, setReceiverShareState] = useState<
     "idle" | "sharing" | "copied"
   >("idle");
 
@@ -372,12 +359,15 @@ export function ReceiverShell({ exchange }: { exchange: ReceiverExchange }) {
             .filter(Boolean)
             .join(" • ") || "Track metadata is revealed once playback starts."
         : "Press Play or Next to start this hidden track. Burner reveals it only after playback begins.";
-  const shareLabel =
-    shareActionState === "sharing"
-      ? "Sharing..."
-      : shareActionState === "copied"
-        ? "Link copied"
-        : "Share with others";
+  const shareUrl =
+    typeof window === "undefined" ? "" : window.location.href;
+  const receiverShareEmailHref = shareUrl
+    ? buildShareEmailHref({
+        senderName: exchange.burner.senderName,
+        shareUrl,
+        title: exchange.burner.title,
+      })
+    : "";
 
   function rememberPrefetchedTrack(track: RevealedTrack) {
     const normalizedTrack = normalizeYouTubeTrackMetadata(track);
@@ -414,47 +404,56 @@ export function ReceiverShell({ exchange }: { exchange: ReceiverExchange }) {
     });
   }
 
-  async function shareWithOthers() {
-    const shareUrl = window.location.href;
-
-    setShareActionState("sharing");
+  async function copyReceiverShareUrl() {
+    if (!shareUrl) {
+      setReceiverShareFeedback("Burner is still resolving the current link.");
+      return;
+    }
 
     try {
-      if (typeof navigator.share === "function") {
-        await navigator.share({
-          title: exchange.burner.title || "Burner mixtape",
-          text: `${exchange.burner.senderName} shared a Burner CD with you.`,
-          url: shareUrl,
-        });
-        setShareActionState("idle");
-        return;
-      }
-
       await copyText(shareUrl);
-      setShareActionState("copied");
-      setStatusMessage(
+      setReceiverShareState("copied");
+      setReceiverShareFeedback(
         "Burner link copied. Share it with whoever should hear this next.",
       );
-      window.setTimeout(() => setShareActionState("idle"), 2000);
+      window.setTimeout(() => setReceiverShareState("idle"), 2000);
+    } catch {
+      setReceiverShareFeedback(
+        "Copy failed in this browser. Use the address bar if needed.",
+      );
+    }
+  }
+
+  async function shareWithOthers() {
+    if (!shareUrl) {
+      setReceiverShareFeedback("Burner is still resolving the current link.");
+      return;
+    }
+
+    if (!canUseWebShare()) {
+      return;
+    }
+
+    setReceiverShareState("sharing");
+    setReceiverShareFeedback(null);
+
+    try {
+      await navigator.share({
+        title: exchange.burner.title || "Burner mixtape",
+        text: `${exchange.burner.senderName} shared a Burner CD with you.`,
+        url: shareUrl,
+      });
+      setReceiverShareState("idle");
     } catch (error) {
       if (error instanceof DOMException && error.name === "AbortError") {
-        setShareActionState("idle");
+        setReceiverShareState("idle");
         return;
       }
 
-      try {
-        await copyText(shareUrl);
-        setShareActionState("copied");
-        setStatusMessage(
-          "Burner could not open the share sheet here, so the link was copied instead.",
-        );
-        window.setTimeout(() => setShareActionState("idle"), 2000);
-      } catch {
-        setShareActionState("idle");
-        setStatusMessage(
-          "Burner could not open the share flow in this browser. Copy the URL from the address bar instead.",
-        );
-      }
+      setReceiverShareState("idle");
+      setReceiverShareFeedback(
+        "This browser would not open the share sheet. Copy the link or send it by email instead.",
+      );
     }
   }
 
@@ -1232,7 +1231,7 @@ export function ReceiverShell({ exchange }: { exchange: ReceiverExchange }) {
         </header>
 
         <section className="receiver-stage">
-          {showIntro ? (
+          {showIntro && !receiverShareDialogOpen ? (
             <ReceiverIntroBanner
               onDismiss={dismissIntro}
               senderName={exchange.burner.senderName}
@@ -1295,11 +1294,14 @@ export function ReceiverShell({ exchange }: { exchange: ReceiverExchange }) {
 
             <button
               className="receiver-banner__share"
-              disabled={shareActionState === "sharing"}
-              onClick={() => void shareWithOthers()}
+              onClick={() => {
+                dismissIntro();
+                setReceiverShareDialogOpen(true);
+                setReceiverShareFeedback(null);
+              }}
               type="button"
             >
-              {shareLabel}
+              Share with others
             </button>
           </header>
 
@@ -1560,6 +1562,25 @@ export function ReceiverShell({ exchange }: { exchange: ReceiverExchange }) {
           </footer>
         </section>
       </section>
+
+      {receiverShareDialogOpen ? (
+        <ShareDialog
+          copied={receiverShareState === "copied"}
+          emailHref={receiverShareEmailHref}
+          feedback={receiverShareFeedback}
+          itemCountLabel={`${exchange.burner.totalTracks} track${exchange.burner.totalTracks === 1 ? "" : "s"}`}
+          onClose={() => {
+            setReceiverShareDialogOpen(false);
+            setReceiverShareFeedback(null);
+            setReceiverShareState("idle");
+          }}
+          onCopy={() => void copyReceiverShareUrl()}
+          onSystemShare={canUseWebShare() ? () => shareWithOthers() : undefined}
+          shareUrl={shareUrl}
+          systemShareBusy={receiverShareState === "sharing"}
+          title={exchange.burner.title}
+        />
+      ) : null}
     </section>
   );
 }

@@ -735,6 +735,16 @@ hr {
   font-size: var(--fs-xs);
 }
 
+.studio-auth-note {
+  margin: 0;
+  padding: 12px 14px;
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius);
+  background: var(--surface-alt);
+  color: var(--muted);
+  line-height: 1.5;
+}
+
 .stack-xs {
   display: grid;
   gap: 4px;
@@ -846,6 +856,26 @@ hr {
 .itunes-window--signin {
   max-width: 380px;
   margin: 0 auto;
+}
+
+.auth-dialog__panel {
+  width: min(460px, 100%);
+  padding: 0;
+  gap: 0;
+  overflow: hidden;
+}
+
+.auth-dialog__header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 16px;
+  padding: 22px 22px 0;
+}
+
+.auth-dialog__body {
+  padding: 18px 22px 22px;
+  background: transparent;
 }
 
 .itunes-signin {
@@ -1135,7 +1165,7 @@ hr {
 .share-dialog {
   position: fixed;
   inset: 0;
-  z-index: 50;
+  z-index: 60;
   display: grid;
   place-items: center;
   padding: 24px;
@@ -1209,6 +1239,32 @@ hr {
 }
 
 .share-dialog__actions {
+  gap: 10px;
+}
+
+.share-dialog__support {
+  display: grid;
+  gap: 12px;
+  padding: 14px 16px;
+  border: 1px solid rgba(110, 124, 148, 0.24);
+  border-radius: 16px;
+  background:
+    linear-gradient(180deg, rgba(248, 244, 234, 0.96), rgba(239, 231, 213, 0.96));
+}
+
+.share-dialog__supporttitle {
+  color: var(--ink);
+  font-size: var(--fs-md);
+  font-weight: 600;
+}
+
+.share-dialog__supportcopy {
+  margin: 0;
+  color: var(--muted);
+  line-height: 1.5;
+}
+
+.share-dialog__supportactions {
   gap: 10px;
 }
 
@@ -2781,14 +2837,32 @@ hr {
   box-shadow: var(--shadow-2);
 }
 
+.my-burns__itemrow {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 12px;
+  align-items: center;
+  padding: 14px 16px;
+}
+
 .my-burns__itemlink {
   display: grid;
   grid-template-columns: 72px 1fr;
   gap: 16px;
   align-items: center;
-  padding: 14px 16px;
+  padding: 0;
+  width: 100%;
+  border: 0;
+  background: transparent;
+  cursor: pointer;
+  font: inherit;
+  text-align: left;
   text-decoration: none;
   color: inherit;
+}
+
+.my-burns__itemlink:disabled {
+  cursor: progress;
 }
 
 .my-burns__cover {
@@ -2836,4 +2910,29 @@ hr {
   letter-spacing: 0.06em;
   text-transform: uppercase;
   color: var(--muted-soft) !important;
+}
+
+.my-burns__delete {
+  min-width: 96px;
+  color: var(--danger);
+  border-color: rgba(181, 74, 58, 0.28);
+}
+
+.my-burns__delete:hover:not(:disabled) {
+  background: linear-gradient(180deg, #fff8f5 0%, #f1dfdb 100%);
+  border-color: rgba(181, 74, 58, 0.45);
+}
+
+.my-burns__delete:active:not(:disabled) {
+  background: linear-gradient(180deg, #ead2cd 0%, #f3e1dc 100%);
+}
+
+@media (max-width: 640px) {
+  .my-burns__itemrow {
+    grid-template-columns: 1fr;
+  }
+
+  .my-burns__delete {
+    justify-self: start;
+  }
 }

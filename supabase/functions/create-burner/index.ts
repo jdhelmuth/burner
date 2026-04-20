@@ -35,6 +35,20 @@ function createShortCode() {
     .toUpperCase();
 }
 
+function getShareBaseUrl(request: Request) {
+  const configured = Deno.env.get("EXPO_PUBLIC_BURNER_WEB_URL")?.trim();
+  if (configured) {
+    return configured;
+  }
+
+  const origin = request.headers.get("origin")?.trim();
+  if (origin) {
+    return origin;
+  }
+
+  return "https://burner.example.com";
+}
+
 function assertString(
   value: unknown,
   field: string,
@@ -174,7 +188,8 @@ serve(async (request) => {
     const slug = `${slugBase}-${crypto.randomUUID().slice(0, 6)}`;
     const shareToken = randomToken(24);
     const shareTokenHash = await sha256(shareToken);
-    const shareBaseUrl = Deno.env.get("EXPO_PUBLIC_BURNER_WEB_URL") ?? "https://burner.example.com";
+    const ownerShareTokenCiphertext = await encryptJson({ shareToken });
+    const shareBaseUrl = getShareBaseUrl(request);
 
     await serviceClient.from("profiles").upsert({
       id: user.id,
@@ -227,6 +242,7 @@ serve(async (request) => {
         burner_id: burner.id,
         slug,
         short_code: shortCode,
+        owner_share_token_ciphertext: ownerShareTokenCiphertext,
         token_hash: shareTokenHash,
       });
 
