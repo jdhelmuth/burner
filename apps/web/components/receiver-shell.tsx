@@ -327,7 +327,7 @@ export function ReceiverShell({ exchange }: { exchange: ReceiverExchange }) {
         ? `Track ${formatTrackPosition(currentVisiblePosition)} revealed`
         : `Track ${formatTrackPosition(activeTrackPosition)} hidden`;
   const mixtapeDescription = exchange.burner.note?.trim()
-    ? `Note from ${exchange.burner.senderName}: ${exchange.burner.note}`
+    ? `Sender's Note: ${exchange.burner.note}`
     : hiddenTrackCount > 0
       ? `${revealedTracks.length}/${exchange.burner.totalTracks} tracks revealed so far. Hidden songs stay masked until they start.`
       : "Every song on this mixtape is unlocked now.";
