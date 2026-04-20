@@ -18,6 +18,7 @@ import {
   type SupabaseClient,
 } from "@supabase/supabase-js";
 
+import { BurnerMark } from "./burner-mark";
 import { CoverArtField } from "./cover-art-field";
 import { ShareDialog } from "./share-dialog";
 import { defaultDraft } from "../lib/provider-catalog";
@@ -1660,7 +1661,10 @@ export function HomeClient() {
       <section className="itunes-window">
         <header className="studio-header">
           <div className="studio-header__copy">
-            <span className="eyebrow">burner studio</span>
+            <span className="eyebrow">
+              <BurnerMark className="eyebrow__mark" size={18} />
+              burner studio
+            </span>
             <h1>{title || "Untitled Burner"}</h1>
           </div>
           <div className="studio-header__actions">
