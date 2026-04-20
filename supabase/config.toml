@@ -37,7 +37,7 @@ secret = "env(SUPABASE_AUTH_APPLE_SECRET)"
 redirect_uri = "http://localhost:54321/auth/v1/callback"
 
 [functions.create-burner]
-verify_jwt = true
+verify_jwt = false
 
 [functions.exchange-share-access]
 verify_jwt = false

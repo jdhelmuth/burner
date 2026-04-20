@@ -5,8 +5,31 @@ function fromBase64(value: string) {
   return Uint8Array.from(atob(value), (char) => char.charCodeAt(0));
 }
 
+function fromHex(value: string) {
+  if (value.length % 2 !== 0) {
+    throw new Error("FIELD_ENCRYPTION_KEY hex value must have an even length.");
+  }
+
+  const bytes = new Uint8Array(value.length / 2);
+  for (let index = 0; index < value.length; index += 2) {
+    bytes[index / 2] = Number.parseInt(value.slice(index, index + 2), 16);
+  }
+
+  return bytes;
+}
+
 function toBase64(value: Uint8Array) {
   return btoa(String.fromCharCode(...value));
+}
+
+function parseEncryptionKey(rawKey: string) {
+  const trimmed = rawKey.trim();
+
+  if (/^[0-9a-fA-F]{64}$/.test(trimmed)) {
+    return fromHex(trimmed);
+  }
+
+  return fromBase64(trimmed);
 }
 
 async function importAesKey() {
@@ -15,10 +38,13 @@ async function importAesKey() {
     throw new Error("FIELD_ENCRYPTION_KEY is not configured");
   }
 
-  return crypto.subtle.importKey("raw", fromBase64(rawKey), "AES-GCM", false, [
-    "encrypt",
-    "decrypt",
-  ]);
+  return crypto.subtle.importKey(
+    "raw",
+    parseEncryptionKey(rawKey),
+    "AES-GCM",
+    false,
+    ["encrypt", "decrypt"],
+  );
 }
 
 export async function encryptJson(payload: unknown) {
