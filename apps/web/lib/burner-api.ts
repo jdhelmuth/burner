@@ -40,6 +40,21 @@ async function describeFunctionError(
   return error instanceof Error ? error.message : fallbackMessage;
 }
 
+async function getBrowserAuthHeaders() {
+  const supabase = getBrowserSupabaseClient();
+  const {
+    data: { session },
+  } = await supabase.auth.getSession();
+
+  if (!session?.access_token) {
+    throw new Error("Burner sign-in expired. Sign in again to open saved burns.");
+  }
+
+  return {
+    Authorization: `Bearer ${session.access_token}`,
+  };
+}
+
 export async function exchangeShareAccess(
   slug: string,
   token?: string,
@@ -166,9 +181,11 @@ export async function completeTrackUnlock(input: {
 
 export async function createBurnerShareLink(input: { burnerId: string }) {
   const supabase = getBrowserSupabaseClient();
+  const headers = await getBrowserAuthHeaders();
   const { data, error } = await supabase.functions.invoke(
     "create-burner-share-link",
     {
+      headers,
       body: input,
     },
   );
@@ -187,9 +204,11 @@ export async function createBurnerShareLink(input: { burnerId: string }) {
 
 export async function getBurnerShareLink(input: { burnerId: string }) {
   const supabase = getBrowserSupabaseClient();
+  const headers = await getBrowserAuthHeaders();
   const { data, error } = await supabase.functions.invoke(
     "get-burner-share-link",
     {
+      headers,
       body: input,
     },
   );
