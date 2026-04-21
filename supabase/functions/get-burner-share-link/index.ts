@@ -37,6 +37,7 @@ function getShareBaseUrl(request: Request) {
 }
 
 type ShareLinkRow = {
+  id: string;
   created_at: string;
   expires_at: string | null;
   owner_share_token_ciphertext: string | null;
@@ -88,6 +89,32 @@ async function createFallbackShareLink(
   throw new Error("Could not create share link");
 }
 
+async function repairLegacyShareLink(
+  userClient: ReturnType<typeof createUserClient>,
+  shareLink: Pick<ShareLinkRow, "id" | "short_code" | "slug">,
+) {
+  const shareToken = randomToken(24);
+  const tokenHash = await sha256(shareToken);
+  const ownerShareTokenCiphertext = await encryptJson({ shareToken });
+
+  const { error } = await userClient
+    .from("burner_share_links")
+    .update({
+      owner_share_token_ciphertext: ownerShareTokenCiphertext,
+      token_hash: tokenHash,
+    })
+    .eq("id", shareLink.id);
+
+  if (error) {
+    throw error;
+  }
+
+  return {
+    shareToken,
+    shareLink,
+  };
+}
+
 serve(async (request) => {
   if (request.method === "OPTIONS") {
     return new Response("ok", { headers: corsHeaders });
@@ -127,7 +154,7 @@ serve(async (request) => {
     const { data: shareLinks, error: shareLinksError } = await userClient
       .from("burner_share_links")
       .select(
-        "slug, short_code, created_at, expires_at, owner_share_token_ciphertext",
+        "id, slug, short_code, created_at, expires_at, owner_share_token_ciphertext",
       )
       .eq("burner_id", burner.id)
       .is("revoked_at", null)
@@ -140,9 +167,17 @@ serve(async (request) => {
     let shareToken: string | null = null;
     let resolvedShareLink: Pick<ShareLinkRow, "short_code" | "slug"> | null =
       null;
+    let legacyShareLinkToRepair:
+      | Pick<ShareLinkRow, "id" | "short_code" | "slug">
+      | null = null;
 
     for (const shareLink of (shareLinks ?? []) as ShareLinkRow[]) {
-      if (!shareLink.owner_share_token_ciphertext || !isShareLinkActive(shareLink)) {
+      if (!isShareLinkActive(shareLink)) {
+        continue;
+      }
+
+      if (!shareLink.owner_share_token_ciphertext) {
+        legacyShareLinkToRepair ??= shareLink;
         continue;
       }
 
@@ -151,6 +186,7 @@ serve(async (request) => {
           shareLink.owner_share_token_ciphertext,
         );
         if (!decrypted.shareToken) {
+          legacyShareLinkToRepair ??= shareLink;
           continue;
         }
 
@@ -158,14 +194,23 @@ serve(async (request) => {
         resolvedShareLink = shareLink;
         break;
       } catch {
-        // Ignore unreadable legacy values and fall through to the next link.
+        legacyShareLinkToRepair ??= shareLink;
       }
     }
 
     if (!shareToken || !resolvedShareLink) {
-      const fallback = await createFallbackShareLink(userClient, burner);
-      shareToken = fallback.shareToken;
-      resolvedShareLink = fallback.shareLink;
+      if (legacyShareLinkToRepair) {
+        const repaired = await repairLegacyShareLink(
+          userClient,
+          legacyShareLinkToRepair,
+        );
+        shareToken = repaired.shareToken;
+        resolvedShareLink = repaired.shareLink;
+      } else {
+        const fallback = await createFallbackShareLink(userClient, burner);
+        shareToken = fallback.shareToken;
+        resolvedShareLink = fallback.shareLink;
+      }
     }
 
     const shareBaseUrl = getShareBaseUrl(request);

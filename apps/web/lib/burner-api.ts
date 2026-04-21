@@ -1,9 +1,44 @@
 import { createLocalShareExchange, encodeLocalSharePacket } from "@burner/core";
 import type { ImportedTrack, RevealedTrack, ShareExchangeResult } from "@burner/core";
+import {
+  FunctionsFetchError,
+  FunctionsHttpError,
+  FunctionsRelayError,
+} from "@supabase/supabase-js";
 
 import { demoExchange, draft } from "./demo-burner";
 import { runtimeFlags } from "./env";
 import { createSupabaseClient, getBrowserSupabaseClient } from "./supabase";
+
+async function describeFunctionError(
+  error: unknown,
+  fallbackMessage: string,
+) {
+  if (error instanceof FunctionsHttpError) {
+    try {
+      const payload = (await error.context.clone().json()) as {
+        error?: string;
+      };
+      if (payload.error) {
+        return payload.error;
+      }
+    } catch {
+      // Fall through to the generic HTTP status copy below.
+    }
+
+    return `${error.message} (${error.context.status})`;
+  }
+
+  if (error instanceof FunctionsFetchError) {
+    return "Burner could not reach Supabase.";
+  }
+
+  if (error instanceof FunctionsRelayError) {
+    return "Supabase could not relay the burner request.";
+  }
+
+  return error instanceof Error ? error.message : fallbackMessage;
+}
 
 export async function exchangeShareAccess(
   slug: string,
@@ -160,7 +195,12 @@ export async function getBurnerShareLink(input: { burnerId: string }) {
   );
 
   if (error) {
-    throw error;
+    throw new Error(
+      await describeFunctionError(
+        error,
+        "Burner could not open that share page.",
+      ),
+    );
   }
 
   return data as {
