@@ -7,7 +7,7 @@ import {
 } from "@supabase/supabase-js";
 
 import { demoExchange, draft } from "./demo-burner";
-import { env, runtimeFlags } from "./env";
+import { runtimeFlags } from "./env";
 import { createSupabaseClient, getBrowserSupabaseClient } from "./supabase";
 
 async function describeFunctionError(
@@ -65,23 +65,19 @@ async function getBrowserAccessToken() {
 }
 
 async function invokeAuthedBrowserFunction<TResponse>(
-  functionName: string,
+  path: string,
   body: Record<string, unknown>,
   fallbackMessage: string,
 ) {
   const accessToken = await getBrowserAccessToken();
-  const response = await fetch(
-    `${env.supabaseUrl.replace(/\/$/, "")}/functions/v1/${functionName}`,
-    {
-      body: JSON.stringify(body),
-      headers: {
-        Authorization: `Bearer ${accessToken}`,
-        "Content-Type": "application/json",
-        apikey: env.supabaseAnonKey,
-      },
-      method: "POST",
+  const response = await fetch(path, {
+    body: JSON.stringify(body),
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+      "Content-Type": "application/json",
     },
-  );
+    method: "POST",
+  });
 
   const responseText = await response.text();
   const parsedPayload = responseText
@@ -239,8 +235,8 @@ export async function createBurnerShareLink(input: { burnerId: string }) {
     shortCode: string;
     slug: string;
   }>(
-    "create-burner-share-link",
-    input,
+    "/api/burner-share-link",
+    { ...input, mode: "create" },
     "Burner could not create that share page.",
   );
 }
@@ -252,8 +248,8 @@ export async function getBurnerShareLink(input: { burnerId: string }) {
     shortCode: string;
     slug: string;
   }>(
-    "get-burner-share-link",
-    input,
+    "/api/burner-share-link",
+    { ...input, mode: "get" },
     "Burner could not open that share page.",
   );
 }
