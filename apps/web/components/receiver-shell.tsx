@@ -499,6 +499,12 @@ export function ReceiverShell({ exchange }: { exchange: ReceiverExchange }) {
   const nextSelectablePosition =
     accessiblePositions.find((position) => position > activeTrackPosition) ??
     null;
+  const previousTransportPosition =
+    activeTrackQueuedAfterCurrent && loadedPlayerPosition !== null
+      ? loadedPlayerPosition
+      : previousSelectablePosition;
+  const nextTransportPosition =
+    activeTrackQueuedAfterCurrent ? activeTrackPosition : nextSelectablePosition;
   useEffect(() => {
     playerTrackRef.current = playerTrack;
   }, [playerTrack]);
@@ -1166,19 +1172,19 @@ export function ReceiverShell({ exchange }: { exchange: ReceiverExchange }) {
   }
 
   function playPreviousTrack() {
-    if (previousSelectablePosition === null) {
+    if (previousTransportPosition === null) {
       return;
     }
 
-    playTrackPosition(previousSelectablePosition);
+    playTrackPosition(previousTransportPosition);
   }
 
   function playNextTrack() {
-    if (nextSelectablePosition === null) {
+    if (nextTransportPosition === null) {
       return;
     }
 
-    playTrackPosition(nextSelectablePosition);
+    playTrackPosition(nextTransportPosition);
   }
 
   playNextTrackRef.current = playNextTrack;
@@ -1297,12 +1303,12 @@ export function ReceiverShell({ exchange }: { exchange: ReceiverExchange }) {
                     <button
                       className="receiver-transport__button"
                       aria-label={
-                        previousSelectablePosition === null
+                        previousTransportPosition === null
                           ? "No previous revealed track"
-                          : `Previous track ${formatTrackPosition(previousSelectablePosition)}`
+                          : `Previous track ${formatTrackPosition(previousTransportPosition)}`
                       }
                       disabled={
-                        previousSelectablePosition === null ||
+                        previousTransportPosition === null ||
                         requestState !== "idle"
                       }
                       onClick={playPreviousTrack}
@@ -1324,12 +1330,12 @@ export function ReceiverShell({ exchange }: { exchange: ReceiverExchange }) {
                     <button
                       className="receiver-transport__button"
                       aria-label={
-                        nextSelectablePosition === null
+                        nextTransportPosition === null
                           ? "No next available track"
-                          : `Next track ${formatTrackPosition(nextSelectablePosition)}`
+                          : `Next track ${formatTrackPosition(nextTransportPosition)}`
                       }
                       disabled={
-                        nextSelectablePosition === null ||
+                        nextTransportPosition === null ||
                         requestState !== "idle"
                       }
                       onClick={playNextTrack}

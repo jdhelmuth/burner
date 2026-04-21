@@ -7,7 +7,7 @@ import {
 } from "@supabase/supabase-js";
 
 import { demoExchange, draft } from "./demo-burner";
-import { runtimeFlags } from "./env";
+import { env, runtimeFlags } from "./env";
 import { createSupabaseClient, getBrowserSupabaseClient } from "./supabase";
 
 async function describeFunctionError(
@@ -40,7 +40,7 @@ async function describeFunctionError(
   return error instanceof Error ? error.message : fallbackMessage;
 }
 
-async function getBrowserAuthHeaders() {
+async function getBrowserAccessToken() {
   const supabase = getBrowserSupabaseClient();
   const {
     data: { session: initialSession },
@@ -61,9 +61,51 @@ async function getBrowserAuthHeaders() {
     session = data.session;
   }
 
-  return {
-    Authorization: `Bearer ${session.access_token}`,
-  };
+  return session.access_token;
+}
+
+async function invokeAuthedBrowserFunction<TResponse>(
+  functionName: string,
+  body: Record<string, unknown>,
+  fallbackMessage: string,
+) {
+  const accessToken = await getBrowserAccessToken();
+  const response = await fetch(
+    `${env.supabaseUrl.replace(/\/$/, "")}/functions/v1/${functionName}`,
+    {
+      body: JSON.stringify(body),
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        "Content-Type": "application/json",
+        apikey: env.supabaseAnonKey,
+      },
+      method: "POST",
+    },
+  );
+
+  const responseText = await response.text();
+  const parsedPayload = responseText
+    ? (() => {
+        try {
+          return JSON.parse(responseText) as { error?: string };
+        } catch {
+          return null;
+        }
+      })()
+    : null;
+
+  if (!response.ok) {
+    throw new Error(
+      parsedPayload?.error ||
+        `${fallbackMessage} (${response.status})`,
+    );
+  }
+
+  if (!parsedPayload) {
+    throw new Error(fallbackMessage);
+  }
+
+  return parsedPayload as TResponse;
 }
 
 export async function exchangeShareAccess(
@@ -191,52 +233,27 @@ export async function completeTrackUnlock(input: {
 }
 
 export async function createBurnerShareLink(input: { burnerId: string }) {
-  const supabase = getBrowserSupabaseClient();
-  const headers = await getBrowserAuthHeaders();
-  const { data, error } = await supabase.functions.invoke(
-    "create-burner-share-link",
-    {
-      headers,
-      body: input,
-    },
-  );
-
-  if (error) {
-    throw error;
-  }
-
-  return data as {
+  return invokeAuthedBrowserFunction<{
     burnerId: string;
     shareUrl: string;
     shortCode: string;
     slug: string;
-  };
+  }>(
+    "create-burner-share-link",
+    input,
+    "Burner could not create that share page.",
+  );
 }
 
 export async function getBurnerShareLink(input: { burnerId: string }) {
-  const supabase = getBrowserSupabaseClient();
-  const headers = await getBrowserAuthHeaders();
-  const { data, error } = await supabase.functions.invoke(
-    "get-burner-share-link",
-    {
-      headers,
-      body: input,
-    },
-  );
-
-  if (error) {
-    throw new Error(
-      await describeFunctionError(
-        error,
-        "Burner could not open that share page.",
-      ),
-    );
-  }
-
-  return data as {
+  return invokeAuthedBrowserFunction<{
     burnerId: string;
     shareUrl: string;
     shortCode: string;
     slug: string;
-  };
+  }>(
+    "get-burner-share-link",
+    input,
+    "Burner could not open that share page.",
+  );
 }
