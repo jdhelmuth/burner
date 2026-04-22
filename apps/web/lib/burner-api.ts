@@ -5,6 +5,70 @@ import { demoExchange, draft } from "./demo-burner";
 import { runtimeFlags } from "./env";
 import { createSupabaseClient, getBrowserSupabaseClient } from "./supabase";
 
+async function getBrowserAccessToken() {
+  const supabase = getBrowserSupabaseClient();
+  const {
+    data: { session: initialSession },
+  } = await supabase.auth.getSession();
+
+  if (!initialSession?.access_token) {
+    throw new Error("Burner sign-in expired. Sign in again to open saved burns.");
+  }
+
+  let session = initialSession;
+  const expiresAtMs = session.expires_at ? session.expires_at * 1000 : 0;
+
+  if (!expiresAtMs || expiresAtMs <= Date.now() + 60_000) {
+    const { data, error } = await supabase.auth.refreshSession();
+    if (error || !data.session?.access_token) {
+      throw new Error("Burner sign-in expired. Sign in again to open saved burns.");
+    }
+    session = data.session;
+  }
+
+  return session.access_token;
+}
+
+async function invokeAuthedBrowserFunction<TResponse>(
+  path: string,
+  body: Record<string, unknown>,
+  fallbackMessage: string,
+) {
+  const accessToken = await getBrowserAccessToken();
+  const response = await fetch(path, {
+    body: JSON.stringify(body),
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+      "Content-Type": "application/json",
+    },
+    method: "POST",
+  });
+
+  const responseText = await response.text();
+  const parsedPayload = responseText
+    ? (() => {
+        try {
+          return JSON.parse(responseText) as { error?: string };
+        } catch {
+          return null;
+        }
+      })()
+    : null;
+
+  if (!response.ok) {
+    throw new Error(
+      parsedPayload?.error ||
+        `${fallbackMessage} (${response.status})`,
+    );
+  }
+
+  if (!parsedPayload) {
+    throw new Error(fallbackMessage);
+  }
+
+  return parsedPayload as TResponse;
+}
+
 export async function exchangeShareAccess(
   slug: string,
   token?: string,
@@ -130,43 +194,27 @@ export async function completeTrackUnlock(input: {
 }
 
 export async function createBurnerShareLink(input: { burnerId: string }) {
-  const supabase = getBrowserSupabaseClient();
-  const { data, error } = await supabase.functions.invoke(
-    "create-burner-share-link",
-    {
-      body: input,
-    },
-  );
-
-  if (error) {
-    throw error;
-  }
-
-  return data as {
+  return invokeAuthedBrowserFunction<{
     burnerId: string;
     shareUrl: string;
     shortCode: string;
     slug: string;
-  };
+  }>(
+    "/api/burner-share-link",
+    { ...input, mode: "create" },
+    "Burner could not create that share page.",
+  );
 }
 
 export async function getBurnerShareLink(input: { burnerId: string }) {
-  const supabase = getBrowserSupabaseClient();
-  const { data, error } = await supabase.functions.invoke(
-    "get-burner-share-link",
-    {
-      body: input,
-    },
-  );
-
-  if (error) {
-    throw error;
-  }
-
-  return data as {
+  return invokeAuthedBrowserFunction<{
     burnerId: string;
     shareUrl: string;
     shortCode: string;
     slug: string;
-  };
+  }>(
+    "/api/burner-share-link",
+    { ...input, mode: "get" },
+    "Burner could not open that share page.",
+  );
 }
