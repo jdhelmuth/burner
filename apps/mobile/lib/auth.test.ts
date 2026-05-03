@@ -39,7 +39,7 @@ describe("parseAuthCallbackUrl", () => {
 });
 
 describe("isSupportedEmailOtpType", () => {
-  it("accepts supported Supabase email otp types", () => {
+  it("accepts supported email otp types", () => {
     expect(isSupportedEmailOtpType("magiclink")).toBe(true);
     expect(isSupportedEmailOtpType("email_change")).toBe(true);
   });

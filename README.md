@@ -8,40 +8,33 @@ Burner is a retro mixtape app for building secret tracklists from YouTube links,
 - `apps/web`: Next.js sender studio and browser-first receiver flow.
 - `packages/core`: shared burner types, reveal logic, and provider contracts.
 - `packages/ui`: shared retro design tokens and view helpers.
-- `supabase`: SQL migrations and Edge Functions.
+- `neon`: SQL migrations for the Neon Postgres backend used by the web app.
 - `docs`: architecture notes, launch checklists, and older provider research.
 
 ## Getting Started
 
-1. Copy `.env.example` to `.env` and fill in the Supabase settings you want locally.
+1. Copy `.env.example` to `.env` and set `DATABASE_URL` to your Neon Postgres connection string.
 2. Install dependencies with `pnpm install`.
-3. If you want to test Google or Apple OAuth locally, add `SUPABASE_AUTH_GOOGLE_CLIENT_ID`, `SUPABASE_AUTH_GOOGLE_SECRET`, `SUPABASE_AUTH_APPLE_CLIENT_ID`, and `SUPABASE_AUTH_APPLE_SECRET` to `.env`, then flip the matching provider blocks in `supabase/config.toml` from `enabled = false` to `enabled = true`.
-4. Start local Supabase with `pnpm supabase:start`.
-5. Serve Edge Functions with `pnpm supabase:functions`.
-6. Start the web app with `pnpm dev:web`.
-7. Rebuild the mobile dev client after adding the Apple/WebBrowser native modules with `pnpm --filter burner-mobile ios` or `pnpm --filter burner-mobile android`.
-8. Start the Expo app with `pnpm dev:mobile`.
-9. On the welcome screen, use `Demo` for a fast local sender session backed by the local Supabase stack, use magic link for passwordless auth, or use Apple/Google once the provider credentials are configured.
+3. Apply the Neon schema with `DATABASE_URL=... pnpm neon:migrate`.
+4. Start the web app with `pnpm dev:web`.
+5. Rebuild the mobile dev client when native modules change with `pnpm --filter burner-mobile ios` or `pnpm --filter burner-mobile android`.
+6. Start the Expo app with `pnpm dev:mobile`.
 
 ## Core Behavior
 
-- Senders authenticate with Supabase Auth.
-- Burners store encrypted track payloads in Supabase.
+- Senders authenticate with Burner’s cookie-backed email/password auth stored in Neon.
+- Burners store encrypted track payloads in Neon Postgres.
 - Share links include a secret token and short code.
 - Recipients only receive the burner shell and the next allowed track.
 - Track reveals unlock after playback begins and progress is recorded.
 
 ## OAuth Notes
 
-- Mobile Google auth uses Supabase OAuth plus `expo-web-browser` and the app callback `burner://auth/callback`.
-- iOS Apple auth uses native `expo-apple-authentication` and exchanges the returned identity token with Supabase.
-- Android and non-iOS Apple auth fall back to the Supabase-hosted Apple OAuth flow in the browser.
-- For hosted Supabase projects, enable Google and Apple providers in the Supabase Auth dashboard and add `burner://auth/callback` to the project's redirect URLs.
-- For local Supabase CLI projects, restart `pnpm supabase:start` after changing provider settings in `supabase/config.toml` or `.env`.
+- Google sign-in is handled by the web app directly (no Supabase). Set `GOOGLE_OAUTH_CLIENT_ID` and `GOOGLE_OAUTH_CLIENT_SECRET` in your env, and register `<your-origin>/api/auth/google/callback` as an authorized redirect URI in your Google Cloud OAuth client. Override the redirect URI with `GOOGLE_OAUTH_REDIRECT_URI` if needed.
+- Email/password sign-up, sign-in, and password recovery run through the web app API alongside Google sign-in.
 
 ## Demo Mode
 
 - Works without any music-provider credentials.
-- If the local Supabase env is present, the `Demo` button creates or signs into a real local sender account using email/password behind the scenes.
-- If Supabase env is absent, Burner publishes a local share URL whose payload is encoded into the link.
+- If backend env is disabled with `NEXT_PUBLIC_DISABLE_BACKEND=true`, Burner publishes a local share URL whose payload is encoded into the link.
 - The web receiver reveals the actual selected YouTube tracks in order in both modes.

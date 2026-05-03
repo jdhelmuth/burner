@@ -3,30 +3,16 @@ import type { ImportedTrack, RevealedTrack, ShareExchangeResult } from "@burner/
 
 import { demoExchange, draft } from "./demo-burner";
 import { runtimeFlags } from "./env";
-import { createSupabaseClient, getBrowserSupabaseClient } from "./supabase";
+import { getSession } from "./auth-client";
 
 async function getBrowserAccessToken() {
-  const supabase = getBrowserSupabaseClient();
-  const {
-    data: { session: initialSession },
-  } = await supabase.auth.getSession();
+  const initialSession = await getSession();
 
   if (!initialSession?.access_token) {
     throw new Error("Burner sign-in expired. Sign in again to open saved burns.");
   }
 
-  let session = initialSession;
-  const expiresAtMs = session.expires_at ? session.expires_at * 1000 : 0;
-
-  if (!expiresAtMs || expiresAtMs <= Date.now() + 60_000) {
-    const { data, error } = await supabase.auth.refreshSession();
-    if (error || !data.session?.access_token) {
-      throw new Error("Burner sign-in expired. Sign in again to open saved burns.");
-    }
-    session = data.session;
-  }
-
-  return session.access_token;
+  return initialSession.access_token;
 }
 
 async function invokeAuthedBrowserFunction<TResponse>(
@@ -79,20 +65,21 @@ export async function exchangeShareAccess(
     return createLocalShareExchange(slug, payload);
   }
 
-  if (!runtimeFlags.isSupabaseConfigured) {
+  if (!runtimeFlags.isBackendConfigured) {
     return createLocalShareExchange(slug, encodeLocalSharePacket(draft));
   }
 
-  const supabase = createSupabaseClient();
-  const { data, error } = await supabase.functions.invoke("exchange-share-access", {
-    body: {
+  const response = await fetch(`${process.env.NEXT_PUBLIC_WEB_ORIGIN ?? ""}/api/exchange-share-access`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
       slug,
       token,
       clientFingerprint,
-    },
+    }),
   });
 
-  if (error) {
+  if (!response.ok) {
     return createLocalShareExchange(
       slug,
       encodeLocalSharePacket({
@@ -116,7 +103,7 @@ export async function exchangeShareAccess(
     );
   }
 
-  return data;
+  return response.json();
 }
 
 export async function exchangeShareAccessInBrowser(
@@ -125,24 +112,26 @@ export async function exchangeShareAccessInBrowser(
   payload?: string,
   clientFingerprint?: string,
 ) {
-  if (payload || !token || !runtimeFlags.isSupabaseConfigured) {
+  if (payload || !token || !runtimeFlags.isBackendConfigured) {
     return exchangeShareAccess(slug, token, payload, clientFingerprint);
   }
 
-  const supabase = getBrowserSupabaseClient();
-  const { data, error } = await supabase.functions.invoke("exchange-share-access", {
-    body: {
+  const response = await fetch("/api/exchange-share-access", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
       slug,
       token,
       clientFingerprint,
-    },
+    }),
   });
 
-  if (error || !data) {
-    throw error ?? new Error("Burner could not open that share link.");
+  if (!response.ok) {
+    const payload = (await response.json().catch(() => null)) as { error?: string } | null;
+    throw new Error(payload?.error ?? "Burner could not open that share link.");
   }
 
-  return data as ShareExchangeResult;
+  return response.json() as Promise<ShareExchangeResult>;
 }
 
 export async function startListenSession(input: {
@@ -151,22 +140,24 @@ export async function startListenSession(input: {
   provider: string;
   sessionToken: string;
 }) {
-  const supabase = getBrowserSupabaseClient();
-  const { data, error } = await supabase.functions.invoke("start-listen-session", {
-    body: input,
+  const response = await fetch("/api/start-listen-session", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(input),
   });
 
-  if (error) {
-    throw error;
+  if (!response.ok) {
+    const payload = (await response.json().catch(() => null)) as { error?: string } | null;
+    throw new Error(payload?.error ?? "Burner could not start playback.");
   }
 
-  return data as {
+  return response.json() as Promise<{
     id: string;
     started_at: string;
     track?: RevealedTrack;
     status?: "blocked";
     nextPosition?: number;
-  };
+  }>;
 }
 
 export async function completeTrackUnlock(input: {
@@ -176,21 +167,23 @@ export async function completeTrackUnlock(input: {
   observedCompletion: boolean;
   sessionToken: string;
 }) {
-  const supabase = getBrowserSupabaseClient();
-  const { data, error } = await supabase.functions.invoke("complete-track-unlock", {
-    body: input,
+  const response = await fetch("/api/complete-track-unlock", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(input),
   });
 
-  if (error) {
-    throw error;
+  if (!response.ok) {
+    const payload = (await response.json().catch(() => null)) as { error?: string } | null;
+    throw new Error(payload?.error ?? "Burner could not unlock the next track.");
   }
 
-  return data as {
+  return response.json() as Promise<{
     status: "pending" | "unlocked" | "blocked";
     reason: string;
     nextPosition?: number | null;
     nextTrack?: RevealedTrack;
-  };
+  }>;
 }
 
 export async function createBurnerShareLink(input: { burnerId: string }) {

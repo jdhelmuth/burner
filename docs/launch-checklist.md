@@ -11,7 +11,7 @@
 
 - Configure Universal Links and Android App Links for production domains.
 - Swap placeholder bundle identifiers and EAS project ID.
-- Add Apple Sign In and Google Sign In flows on top of Supabase Auth.
+- Re-enable Apple Sign In, Google Sign In, and password recovery on top of the Neon-backed auth layer or a dedicated auth provider.
 - Finalize MusicKit entitlements and Spotify redirect URIs.
 
 ## Backend readiness

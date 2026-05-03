@@ -2,10 +2,13 @@
 
 import Link from "next/link";
 import { useEffect, useState } from "react";
-import type { Session } from "@supabase/supabase-js";
 
 import { runtimeFlags } from "../lib/env";
-import { getBrowserSupabaseClient } from "../lib/supabase";
+import {
+  getSession,
+  onAuthStateChange,
+  type AppSession,
+} from "../lib/auth-client";
 
 type BurnerRow = {
   id: string;
@@ -54,7 +57,7 @@ function omitShareLink(
 }
 
 export function MyBurnsClient() {
-  const [session, setSession] = useState<Session | null>(null);
+  const [session, setSession] = useState<AppSession | null>(null);
   const [authReady, setAuthReady] = useState(false);
   const [state, setState] = useState<LoadState>({ kind: "loading" });
   const [pendingAction, setPendingAction] = useState<{
@@ -66,21 +69,17 @@ export function MyBurnsClient() {
     pendingAction?.kind === "deleting" ? pendingAction.burnerId : null;
 
   useEffect(() => {
-    if (!runtimeFlags.isSupabaseConfigured) {
+    if (!runtimeFlags.isBackendConfigured) {
       setAuthReady(true);
       return;
     }
 
-    const supabase = getBrowserSupabaseClient();
-
-    supabase.auth.getSession().then(({ data }) => {
-      setSession(data.session ?? null);
+    getSession().then((nextSession) => {
+      setSession(nextSession);
       setAuthReady(true);
     });
 
-    const {
-      data: { subscription },
-    } = supabase.auth.onAuthStateChange((_event, nextSession) => {
+    const subscription = onAuthStateChange((nextSession) => {
       setSession(nextSession ?? null);
     });
 
@@ -92,45 +91,33 @@ export function MyBurnsClient() {
       return;
     }
 
-    const supabase = getBrowserSupabaseClient();
     let cancelled = false;
 
     async function load() {
       setState({ kind: "loading" });
       setActionError(null);
 
-      const { data: burners, error } = await supabase
-        .from("burners")
-        .select(
-          "id, slug, title, sender_name, cover_image_url, total_tracks, is_revoked, created_at",
-        )
-        .order("created_at", { ascending: false });
+      const response = await fetch("/api/burners", { credentials: "include" });
+      const payload = (await response.json().catch(() => null)) as
+        | {
+            burners?: BurnerRow[];
+            shareLinks?: ShareLinkRow[];
+            error?: string;
+          }
+        | null;
 
       if (cancelled) return;
 
-      if (error) {
-        setState({ kind: "error", message: error.message });
+      if (!response.ok) {
+        setState({ kind: "error", message: payload?.error ?? "Could not load burns." });
         return;
       }
 
-      const rows = (burners ?? []) as BurnerRow[];
+      const rows = payload?.burners ?? [];
 
       let shareLinks: Record<string, ShareLinkRow> = {};
-      if (rows.length > 0) {
-        const { data: links } = await supabase
-          .from("burner_share_links")
-          .select("burner_id, created_at, short_code, slug")
-          .in(
-            "burner_id",
-            rows.map((r) => r.id),
-          )
-          .order("created_at", { ascending: true });
-
-        if (links) {
-          for (const link of links as ShareLinkRow[]) {
-            shareLinks[link.burner_id] ??= link;
-          }
-        }
+      for (const link of payload?.shareLinks ?? []) {
+        shareLinks[link.burner_id] ??= link;
       }
 
       if (cancelled) return;
@@ -156,11 +143,16 @@ export function MyBurnsClient() {
     setActionError(null);
     setPendingAction({ burnerId: burner.id, kind: "deleting" });
 
-    const supabase = getBrowserSupabaseClient();
-    const { error } = await supabase.from("burners").delete().eq("id", burner.id);
+    const response = await fetch("/api/burners", {
+      method: "DELETE",
+      credentials: "include",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ burnerId: burner.id }),
+    });
 
-    if (error) {
-      setActionError(error.message);
+    if (!response.ok) {
+      const payload = (await response.json().catch(() => null)) as { error?: string } | null;
+      setActionError(payload?.error ?? "Could not delete that burn.");
       setPendingAction(null);
       return;
     }
@@ -179,7 +171,7 @@ export function MyBurnsClient() {
     setPendingAction(null);
   }
 
-  if (!runtimeFlags.isSupabaseConfigured) {
+  if (!runtimeFlags.isBackendConfigured) {
     return (
       <main className="my-burns">
         <header className="my-burns__header">

@@ -2,11 +2,11 @@
 
 ## Monorepo layout
 
-- `apps/mobile` holds the Expo app with Expo Router, Supabase auth, provider adapters, and sender/receiver flows.
+- `apps/mobile` holds the Expo app with Expo Router, provider adapters, and sender/receiver flows.
 - `apps/web` is the anonymous receiver surface for share links, install prompts, and app handoff.
 - `packages/core` defines burner types, share/reveal state, provider contracts, and unlock logic used across clients and backend logic.
 - `packages/ui` centralizes retro color, spacing, and presentation helpers so the visual language stays consistent.
-- `supabase` contains the relational model and privileged edge functions that prevent unrevealed tracks from leaking.
+- `neon` contains the relational schema. The privileged sender/receiver flows run as Next.js API routes backed by Neon Postgres.
 
 ## Reveal model
 
@@ -20,8 +20,8 @@
 
 ## Security model
 
-- Hidden track metadata is encrypted in Edge Functions with `FIELD_ENCRYPTION_KEY`.
+- Hidden track metadata is encrypted in Next.js API routes with `FIELD_ENCRYPTION_KEY`.
 - Share links are verified by token hash rather than storing plaintext tokens.
 - Recipient sessions are anonymous and keyed by client fingerprint + regenerated session token.
-- Burner authorship and provider credentials remain protected by RLS on sender-owned rows.
-- Recipient-facing tables are service-managed only and accessed via Edge Functions.
+- Burner authorship is checked in API routes before sender-owned rows are returned or modified.
+- Recipient-facing tables are only accessed through API routes.

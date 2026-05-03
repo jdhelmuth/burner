@@ -1,15 +1,34 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
-import type { Session, User } from "@supabase/supabase-js";
 
 const DEMO_SESSION_KEY = "burner.demo.session";
 
-type DemoSession = {
-  session: Session | null;
-  user: User | null;
+export type DemoUser = {
+  id: string;
+  app_metadata: Record<string, unknown>;
+  user_metadata: {
+    display_name?: string;
+  };
+  aud: string;
+  created_at: string;
+  email?: string;
+};
+
+type DemoAuthSession = {
+  access_token: string;
+  refresh_token: string;
+  expires_in: number;
+  expires_at: number;
+  token_type: "bearer";
+  user: DemoUser;
+};
+
+export type DemoSession = {
+  session: DemoAuthSession | null;
+  user: DemoUser | null;
 };
 
 function buildDemoSession(email = "demo@burner.local"): DemoSession {
-  const user: User = {
+  const user: DemoUser = {
     id: "demo-sender",
     app_metadata: {},
     user_metadata: {
@@ -20,7 +39,7 @@ function buildDemoSession(email = "demo@burner.local"): DemoSession {
     email,
   };
 
-  const session: Session = {
+  const session: DemoAuthSession = {
     access_token: "demo-access-token",
     refresh_token: "demo-refresh-token",
     expires_in: 3600,

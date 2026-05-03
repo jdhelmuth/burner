@@ -10,8 +10,9 @@ import { getAuthErrorMessage } from "../../lib/auth";
 import { appTheme } from "../../theme";
 
 export default function WelcomeScreen() {
-  const { signInWithMagicLink, signInWithApple, signInWithGoogle, continueAsDemoSender, loading, isDemoAuth } = useAuth();
+  const { signInWithPassword, signUpWithPassword, signInWithApple, signInWithGoogle, continueAsDemoSender, loading, isDemoAuth } = useAuth();
   const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
   const [pendingAction, setPendingAction] = useState<string | null>(null);
 
   const isBusy = loading || Boolean(pendingAction);
@@ -28,15 +29,17 @@ export default function WelcomeScreen() {
     }
   }
 
-  async function handleMagicLink() {
+  async function handleSignIn() {
     await runAuthAction(
-      "magic",
-      () => signInWithMagicLink(email),
-      () =>
-        Alert.alert(
-          "Check your inbox",
-          "Burner sent the magic link. Open it on this device and the callback screen will finish the session.",
-        ),
+      "signin",
+      () => signInWithPassword(email, password),
+      () => router.replace("/(tabs)"),
+    );
+  }
+
+  async function handleSignUp() {
+    await runAuthAction("signup", () => signUpWithPassword(email, password), () =>
+      router.replace("/(tabs)"),
     );
   }
 
@@ -72,8 +75,8 @@ export default function WelcomeScreen() {
           <Text style={styles.label}>Sender sign-in</Text>
           <Text style={styles.helper}>
             {isDemoAuth
-              ? "Running without Supabase credentials. Demo sender mode will work instantly."
-              : "Use magic link for production-style auth, or test Apple/Google OAuth if configured."}
+              ? "Running without backend credentials. Demo sender mode will work instantly."
+              : "Sign in with your Burner email and password."}
           </Text>
           <TextInput
             autoCapitalize="none"
@@ -84,13 +87,31 @@ export default function WelcomeScreen() {
             style={styles.input}
             value={email}
           />
+          <TextInput
+            autoCapitalize="none"
+            onChangeText={setPassword}
+            placeholder="password"
+            placeholderTextColor={appTheme.colors.textMuted}
+            secureTextEntry
+            style={styles.input}
+            value={password}
+          />
           <Pressable
-            disabled={!email || isBusy}
-            onPress={handleMagicLink}
+            disabled={!email || (!isDemoAuth && !password) || isBusy}
+            onPress={handleSignIn}
             style={styles.secondaryButton}
           >
-            <Text style={styles.secondaryText}>{isDemoAuth ? "Enter demo sender mode" : "Send magic link"}</Text>
+            <Text style={styles.secondaryText}>{isDemoAuth ? "Enter demo sender mode" : "Sign in"}</Text>
           </Pressable>
+          {!isDemoAuth ? (
+            <Pressable
+              disabled={!email || !password || isBusy}
+              onPress={handleSignUp}
+              style={styles.secondaryButton}
+            >
+              <Text style={styles.secondaryText}>Create account</Text>
+            </Pressable>
+          ) : null}
           <View style={styles.row}>
             <Pressable disabled={isBusy} onPress={handleGoogle} style={[styles.oauthButton, isBusy && styles.disabledButton]}>
               <Text style={styles.oauthText}>Google</Text>
