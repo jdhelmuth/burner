@@ -147,6 +147,28 @@ function sanitizeDraftForLocalShare(draft: BurnerDraft): {
   };
 }
 
+function recordBrowserBurnEvent(
+  draft: BurnerDraft,
+  source: "anonymous-browser" | "local-fallback",
+) {
+  const body = JSON.stringify({
+    source,
+    trackCount: draft.tracks.length,
+    hasCover: Boolean(draft.coverImageUrl),
+  });
+
+  void fetch("/api/browser-burn-events", {
+    body,
+    headers: {
+      "Content-Type": "application/json",
+    },
+    keepalive: true,
+    method: "POST",
+  }).catch(() => {
+    // Counting should never block someone from getting their share link.
+  });
+}
+
 function buildLocalPublishResult(draft: BurnerDraft): PublishResult {
   const { draft: cleanDraft, warnings } = sanitizeDraftForLocalShare(draft);
   const slugBase = slugifyBurnerTitle(cleanDraft.title);
@@ -1286,6 +1308,7 @@ export function HomeClient() {
 
       if (!runtimeFlags.isBackendConfigured || !session) {
         const localResult = buildLocalPublishResult(draft);
+        recordBrowserBurnEvent(draft, "anonymous-browser");
         storePublishedShare(localResult);
         setAuthMessage(
           localResult.warnings?.join(" ") ??
@@ -1317,6 +1340,7 @@ export function HomeClient() {
             payload,
           );
           const localResult = buildLocalPublishResult(draft);
+          recordBrowserBurnEvent(draft, "local-fallback");
           storePublishedShare(localResult);
           if (localResult.warnings && localResult.warnings.length > 0) {
             setAuthMessage(localResult.warnings.join(" "));
@@ -1342,6 +1366,7 @@ export function HomeClient() {
     } catch (error) {
       if (shouldUseLocalPublishFallback(error)) {
         const localResult = buildLocalPublishResult(draft);
+        recordBrowserBurnEvent(draft, "local-fallback");
         storePublishedShare(localResult);
         if (localResult.warnings && localResult.warnings.length > 0) {
           setAuthMessage(localResult.warnings.join(" "));
