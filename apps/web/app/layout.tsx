@@ -4,6 +4,7 @@ import { Analytics } from "@vercel/analytics/next";
 import { webRetroThemeClassName, webRetroThemeCss } from "@burner/ui";
 
 import { CanonicalLocalhost } from "../components/canonical-localhost";
+import { ThemeToggle } from "../components/theme-toggle";
 import {
   burnerBrandName,
   burnerMetaDescription,
@@ -15,15 +16,34 @@ export const metadata: Metadata = {
   description: burnerMetaDescription,
 };
 
+const themeBootScript = `
+(function () {
+  try {
+    var stored = localStorage.getItem('burner-theme');
+    var prefersDark =
+      typeof window.matchMedia === 'function' &&
+      window.matchMedia('(prefers-color-scheme: dark)').matches;
+    var theme = stored === 'dark' || stored === 'light'
+      ? stored
+      : prefersDark ? 'dark' : 'light';
+    document.documentElement.dataset.theme = theme;
+  } catch (e) {
+    document.documentElement.dataset.theme = 'light';
+  }
+})();
+`.trim();
+
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
-    <html lang="en">
+    <html className={webRetroThemeClassName} lang="en" suppressHydrationWarning>
       <head>
         <style id="burner-web-retro-theme">{webRetroThemeCss}</style>
+        <script dangerouslySetInnerHTML={{ __html: themeBootScript }} />
       </head>
-      <body className={webRetroThemeClassName}>
+      <body>
         <CanonicalLocalhost />
         {children}
+        <ThemeToggle />
         <Analytics />
       </body>
     </html>
