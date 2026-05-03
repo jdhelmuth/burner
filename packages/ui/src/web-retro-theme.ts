@@ -1,25 +1,25 @@
 export const webRetroTheme = {
   colorScheme: "light",
   colors: {
-    ink: "#20242c",
-    inkSoft: "#38404d",
-    muted: "#5d697d",
-    mutedSoft: "#8090a4",
-    hairline: "rgba(69, 83, 104, 0.22)",
-    hairlineStrong: "rgba(57, 70, 91, 0.38)",
-    pageBg: "#c6cfdb",
-    surface: "#f7fafe",
-    surfaceAlt: "#e5ebf4",
-    surfaceSunken: "#d5dce8",
-    rowAlt: "#eff4fa",
-    accent: "#3d79cb",
-    accentDeep: "#244f9b",
-    accentSoft: "#d7e5fb",
-    ember: "#ef8a2f",
-    emberDeep: "#b55509",
-    danger: "#b54a3a",
-    warning: "#b98a2a",
-    success: "#4a8a4a",
+    ink: "#171b22",
+    inkSoft: "#313a48",
+    muted: "#5e697a",
+    mutedSoft: "#8995a6",
+    hairline: "rgba(56, 70, 93, 0.2)",
+    hairlineStrong: "rgba(42, 56, 80, 0.4)",
+    pageBg: "#bec8d6",
+    surface: "#fbfdff",
+    surfaceAlt: "#eaf0f8",
+    surfaceSunken: "#d2dbe8",
+    rowAlt: "#f4f7fb",
+    accent: "#2f6fbd",
+    accentDeep: "#1d4f94",
+    accentSoft: "#dfeaf9",
+    ember: "#ee7d20",
+    emberDeep: "#a64d0f",
+    danger: "#a94338",
+    warning: "#a87a1e",
+    success: "#3f7f4f",
   },
   radii: {
     sm: "3px",
@@ -27,18 +27,21 @@ export const webRetroTheme = {
     lg: "8px",
   },
   shadows: {
-    sm: "0 1px 2px rgba(30, 28, 35, 0.08)",
-    md: "0 2px 6px rgba(30, 28, 35, 0.1)",
-    lg: "0 8px 22px rgba(30, 28, 35, 0.12)",
-    insetTop: "inset 0 1px 0 rgba(255, 255, 255, 0.65)",
+    sm: "0 1px 2px rgba(16, 22, 34, 0.08)",
+    md: "0 8px 18px rgba(16, 22, 34, 0.1)",
+    lg: "0 22px 48px rgba(16, 22, 34, 0.16)",
+    insetTop: "inset 0 1px 0 rgba(255, 255, 255, 0.78)",
   },
   typography: {
     ui: [
+      '"Avenir Next"',
+      '"SF Pro Text"',
+      "-apple-system",
+      "BlinkMacSystemFont",
+      '"Helvetica Neue"',
       '"Lucida Grande"',
-      '"Lucida Sans Unicode"',
       '"Segoe UI"',
       "Tahoma",
-      '"Helvetica Neue"',
       "Arial",
       "sans-serif",
     ].join(", "),
@@ -53,6 +56,37 @@ export const webRetroTheme = {
       "2xl": "26px",
       "3xl": "34px",
     },
+  },
+} as const;
+
+export const webRetroDarkPalette = {
+  colorScheme: "dark",
+  colors: {
+    ink: "#e9eef6",
+    inkSoft: "#bdc6d4",
+    muted: "#8893a6",
+    mutedSoft: "#6c7585",
+    hairline: "rgba(180, 196, 220, 0.14)",
+    hairlineStrong: "rgba(180, 196, 220, 0.28)",
+    pageBg: "#141923",
+    surface: "#1d2431",
+    surfaceAlt: "#232b3a",
+    surfaceSunken: "#10141c",
+    rowAlt: "#1f2532",
+    accent: "#5a9ce8",
+    accentDeep: "#87b8f0",
+    accentSoft: "rgba(90, 156, 232, 0.18)",
+    ember: "#f08a2c",
+    emberDeep: "#ba5a0d",
+    danger: "#e07a6e",
+    warning: "#d9b65a",
+    success: "#6ec27f",
+  },
+  shadows: {
+    sm: "0 1px 2px rgba(0, 0, 0, 0.4)",
+    md: "0 8px 18px rgba(0, 0, 0, 0.45)",
+    lg: "0 22px 48px rgba(0, 0, 0, 0.55)",
+    insetTop: "inset 0 1px 0 rgba(255, 255, 255, 0.06)",
   },
 } as const;
 
@@ -97,5 +131,32 @@ export const webRetroThemeCss = `
   --fs-xl: ${webRetroTheme.typography.sizes.xl};
   --fs-2xl: ${webRetroTheme.typography.sizes["2xl"]};
   --fs-3xl: ${webRetroTheme.typography.sizes["3xl"]};
+}
+
+.${webRetroThemeClassName}[data-theme="dark"] {
+  color-scheme: ${webRetroDarkPalette.colorScheme};
+  --ink: ${webRetroDarkPalette.colors.ink};
+  --ink-soft: ${webRetroDarkPalette.colors.inkSoft};
+  --muted: ${webRetroDarkPalette.colors.muted};
+  --muted-soft: ${webRetroDarkPalette.colors.mutedSoft};
+  --hairline: ${webRetroDarkPalette.colors.hairline};
+  --hairline-strong: ${webRetroDarkPalette.colors.hairlineStrong};
+  --page-bg: ${webRetroDarkPalette.colors.pageBg};
+  --surface: ${webRetroDarkPalette.colors.surface};
+  --surface-alt: ${webRetroDarkPalette.colors.surfaceAlt};
+  --surface-sunken: ${webRetroDarkPalette.colors.surfaceSunken};
+  --row-alt: ${webRetroDarkPalette.colors.rowAlt};
+  --accent: ${webRetroDarkPalette.colors.accent};
+  --accent-deep: ${webRetroDarkPalette.colors.accentDeep};
+  --accent-soft: ${webRetroDarkPalette.colors.accentSoft};
+  --ember: ${webRetroDarkPalette.colors.ember};
+  --ember-deep: ${webRetroDarkPalette.colors.emberDeep};
+  --danger: ${webRetroDarkPalette.colors.danger};
+  --warning: ${webRetroDarkPalette.colors.warning};
+  --success: ${webRetroDarkPalette.colors.success};
+  --shadow-1: ${webRetroDarkPalette.shadows.sm};
+  --shadow-2: ${webRetroDarkPalette.shadows.md};
+  --shadow-3: ${webRetroDarkPalette.shadows.lg};
+  --inset-top: ${webRetroDarkPalette.shadows.insetTop};
 }
 `.trim();
