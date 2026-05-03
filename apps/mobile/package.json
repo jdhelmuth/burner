@@ -16,7 +16,6 @@
     "@burner/ui": "workspace:*",
     "@react-native-async-storage/async-storage": "^1.24.0",
     "@react-navigation/native": "^7.0.14",
-    "@supabase/supabase-js": "^2.47.10",
     "@tanstack/react-query": "^5.62.7",
     "expo": "^52.0.20",
     "expo-apple-authentication": "^55.0.13",

@@ -10,7 +10,6 @@ import {
   type BurnerDraft,
   type ImportedTrack,
 } from "@burner/core";
-import { type Session, type SupabaseClient } from "@supabase/supabase-js";
 
 import { BurnerLogo } from "./burner-logo";
 import { CoverArtField } from "./cover-art-field";
@@ -25,7 +24,15 @@ import {
   copyText,
 } from "../lib/share-utils";
 import { env, runtimeFlags } from "../lib/env";
-import { getBrowserSupabaseClient } from "../lib/supabase";
+import {
+  getSession,
+  onAuthStateChange,
+  requestPasswordReset,
+  signInWithPassword,
+  signOut,
+  signUp,
+  type AppSession,
+} from "../lib/auth-client";
 import { loadYouTubeIframeApi } from "../lib/youtube-player";
 import {
   extractYouTubeImportCandidates,
@@ -162,7 +169,7 @@ function buildLocalPublishResult(draft: BurnerDraft): PublishResult {
   };
 }
 
-function deriveSenderName(session: Session | null) {
+function deriveSenderName(session: AppSession | null) {
   if (!session) {
     return defaultDraft.senderName;
   }
@@ -220,12 +227,7 @@ function moveTrackToIndex(
 }
 
 export function HomeClient() {
-  const supabase = useMemo<SupabaseClient | null>(
-    () =>
-      runtimeFlags.isSupabaseConfigured ? getBrowserSupabaseClient() : null,
-    [],
-  );
-  const [session, setSession] = useState<Session | null>(null);
+  const [session, setSession] = useState<AppSession | null>(null);
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [signupDisplayName, setSignupDisplayName] = useState("");
@@ -303,7 +305,7 @@ export function HomeClient() {
   );
 
   useEffect(() => {
-    if (!supabase) {
+    if (!runtimeFlags.isBackendConfigured) {
       setSession(null);
       setSenderName((current) =>
         current.trim() ? current : defaultDraft.senderName,
@@ -313,21 +315,18 @@ export function HomeClient() {
 
     let active = true;
 
-    supabase.auth.getSession().then(({ data }) => {
+    getSession().then((nextSession) => {
       if (!active) {
         return;
       }
 
-      const nextSession = data.session ?? null;
       setSession(nextSession);
       setSenderName((current) =>
         current.trim() ? current : deriveSenderName(nextSession),
       );
     });
 
-    const {
-      data: { subscription },
-    } = supabase.auth.onAuthStateChange((_event, nextSession) => {
+    const subscription = onAuthStateChange((nextSession) => {
       if (!active) {
         return;
       }
@@ -354,10 +353,10 @@ export function HomeClient() {
       active = false;
       subscription.unsubscribe();
     };
-  }, [supabase]);
+  }, []);
 
   useEffect(() => {
-    if (typeof window === "undefined" || !supabase || !session) {
+    if (typeof window === "undefined" || !runtimeFlags.isBackendConfigured || !session) {
       return;
     }
 
@@ -400,11 +399,36 @@ export function HomeClient() {
     return () => {
       cancelled = true;
     };
-  }, [supabase, session]);
+  }, [session]);
 
   useEffect(() => {
     previewTransportRef.current = previewTransport;
   }, [previewTransport]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") {
+      return;
+    }
+    const url = new URL(window.location.href);
+    const authError = url.searchParams.get("auth_error");
+    if (!authError) {
+      return;
+    }
+    const messages: Record<string, string> = {
+      invalid_state: "Sign-in link expired. Please try again.",
+      no_email: "Google did not return an email for this account.",
+      exchange_failed: "Could not finish Google sign-in. Please try again.",
+      access_denied: "Google sign-in was cancelled.",
+    };
+    setAuthMessage(messages[authError] ?? `Google sign-in failed (${authError}).`);
+    setShowAuthDialog(true);
+    url.searchParams.delete("auth_error");
+    window.history.replaceState(
+      null,
+      "",
+      `${url.pathname}${url.search}${url.hash}`,
+    );
+  }, []);
 
   useEffect(() => {
     if (!showAuthDialog) {
@@ -834,8 +858,8 @@ export function HomeClient() {
   }
 
   async function handleSignInPassword() {
-    if (!supabase) {
-      setAuthMessage("Supabase auth is not configured on this deployment yet.");
+    if (!runtimeFlags.isBackendConfigured) {
+      setAuthMessage("Backend auth is not configured on this deployment yet.");
       return;
     }
 
@@ -845,16 +869,11 @@ export function HomeClient() {
     }
 
     await runAuthAction("signin", async () => {
-      const { error } = await supabase.auth.signInWithPassword({
+      await signInWithPassword({
         email: email.trim(),
         password,
-        options: {
-          captchaToken: captchaToken || undefined,
-        },
+        captchaToken: captchaToken || undefined,
       });
-      if (error) {
-        throw error;
-      }
       setPassword("");
       setCaptchaToken("");
       if (turnstileWidgetIdRef.current && window.turnstile) {
@@ -864,8 +883,8 @@ export function HomeClient() {
   }
 
   async function handleSignUp() {
-    if (!supabase) {
-      setAuthMessage("Supabase auth is not configured on this deployment yet.");
+    if (!runtimeFlags.isBackendConfigured) {
+      setAuthMessage("Backend auth is not configured on this deployment yet.");
       return;
     }
 
@@ -888,20 +907,12 @@ export function HomeClient() {
 
     await runAuthAction("signup", async () => {
       try {
-        const { data, error } = await supabase.auth.signUp({
+        const data = await signUp({
           email: email.trim(),
           password,
-          options: {
-            captchaToken: captchaToken || undefined,
-            emailRedirectTo: `${window.location.origin}/auth/callback`,
-            data: signupDisplayName.trim()
-              ? { display_name: signupDisplayName.trim() }
-              : undefined,
-          },
+          captchaToken: captchaToken || undefined,
+          displayName: signupDisplayName.trim() || undefined,
         });
-        if (error) {
-          throw error;
-        }
         setPassword("");
         setCaptchaToken("");
         if (!data.session) {
@@ -919,8 +930,8 @@ export function HomeClient() {
   }
 
   async function handleForgotPassword() {
-    if (!supabase) {
-      setAuthMessage("Supabase auth is not configured on this deployment yet.");
+    if (!runtimeFlags.isBackendConfigured) {
+      setAuthMessage("Backend auth is not configured on this deployment yet.");
       return;
     }
 
@@ -937,62 +948,35 @@ export function HomeClient() {
     }
 
     await runAuthAction("forgot", async () => {
-      const { error } = await supabase.auth.resetPasswordForEmail(
-        email.trim(),
-        {
-          captchaToken: captchaToken || undefined,
-          redirectTo: `${window.location.origin}/auth/callback`,
-        },
-      );
-      if (error) {
-        throw error;
-      }
+      await requestPasswordReset(email.trim());
       setCaptchaToken("");
       if (turnstileWidgetIdRef.current && window.turnstile) {
         window.turnstile.reset(turnstileWidgetIdRef.current);
       }
       setAuthMessage(
-        "Password reset link sent. Check your inbox and click through to set a new password.",
+        "If that email has a Burner account, a reset link is on the way.",
       );
     });
   }
 
   async function handleOAuth(provider: "google") {
-    if (!supabase) {
-      setAuthMessage("Supabase auth is not configured on this deployment yet.");
+    if (!runtimeFlags.isBackendConfigured) {
+      setAuthMessage("Backend auth is not configured on this deployment yet.");
       return;
     }
 
     await runAuthAction(provider, async () => {
-      const { data, error } = await supabase.auth.signInWithOAuth({
-        provider,
-        options: {
-          redirectTo: `${window.location.origin}/auth/callback`,
-        },
-      });
-
-      if (error) {
-        throw error;
-      }
-
-      if (!data.url) {
-        throw new Error("Google OAuth is not configured in Supabase yet.");
-      }
-
-      window.location.assign(data.url);
+      window.location.assign(`/api/auth/${provider}/start`);
     });
   }
 
   async function handleSignOut() {
-    if (!supabase) {
+    if (!runtimeFlags.isBackendConfigured) {
       return;
     }
 
     await runAuthAction("signout", async () => {
-      const { error } = await supabase.auth.signOut();
-      if (error) {
-        throw error;
-      }
+      await signOut();
 
       await stopCurrentPreview({ clearSelection: true });
       setAuthMode("signin");
@@ -1300,7 +1284,7 @@ export function HomeClient() {
         window.setTimeout(resolve, BURN_ANIMATION_DURATION_MS),
       );
 
-      if (!supabase || !session) {
+      if (!runtimeFlags.isBackendConfigured || !session) {
         const localResult = buildLocalPublishResult(draft);
         storePublishedShare(localResult);
         setAuthMessage(
@@ -1310,18 +1294,13 @@ export function HomeClient() {
         return;
       }
 
-      const response = await fetch(
-        `${env.supabaseUrl.replace(/\/$/, "")}/functions/v1/create-burner`,
-        {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            Authorization: `Bearer ${session.access_token}`,
-            apikey: env.supabaseAnonKey,
-          },
-          body: JSON.stringify(draft),
+      const response = await fetch("/api/create-burner", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
         },
-      );
+        body: JSON.stringify(draft),
+      });
 
       const payload = (await response.json().catch(() => null)) as
         | PublishResult
@@ -1402,7 +1381,7 @@ export function HomeClient() {
     activePlaylistPreviewIndex < tracks.length - 1;
   const transportIsBusy =
     previewBusyTrackId !== null || previewState === "loading";
-  const browserOnlyMode = !runtimeFlags.isSupabaseConfigured;
+  const browserOnlyMode = !runtimeFlags.isBackendConfigured;
   const browserOnlyModeMessage = browserOnlyMode
     ? "Browser-only publishing is active on this deployment. Burner will pack the mixtape into the share link itself, so extra-large playlists can be too long to send."
     : null;
@@ -1445,7 +1424,7 @@ export function HomeClient() {
       })
     : "";
   const historyUpsellMessage =
-    runtimeFlags.isSupabaseConfigured && !session
+    runtimeFlags.isBackendConfigured && !session
       ? "Burn links without an account. Want your burn history later? Create an account, then sign in from the top right."
       : null;
 
@@ -1458,7 +1437,7 @@ export function HomeClient() {
           onLoad={() => setTurnstileReady(true)}
         />
       ) : null}
-      {showAuthDialog && runtimeFlags.isSupabaseConfigured && !session ? (
+      {showAuthDialog && runtimeFlags.isBackendConfigured && !session ? (
         <div
           aria-labelledby="auth-dialog-title"
           aria-modal="true"
@@ -1709,7 +1688,7 @@ export function HomeClient() {
           </div>
           <div className="studio-header__side">
             <div className="studio-header__utility">
-              {runtimeFlags.isSupabaseConfigured && session ? (
+              {runtimeFlags.isBackendConfigured && session ? (
                 <Link
                   className="button button--secondary button--utility"
                   href="/my-burns"
@@ -1717,7 +1696,7 @@ export function HomeClient() {
                   My Burns
                 </Link>
               ) : null}
-              {runtimeFlags.isSupabaseConfigured && session ? (
+              {runtimeFlags.isBackendConfigured && session ? (
                 <button
                   className="button button--secondary button--utility"
                   disabled={authBusy !== null}
@@ -1727,7 +1706,7 @@ export function HomeClient() {
                   Sign Out
                 </button>
               ) : null}
-              {runtimeFlags.isSupabaseConfigured && !session ? (
+              {runtimeFlags.isBackendConfigured && !session ? (
                 <button
                   className="button button--secondary button--utility"
                   disabled={authBusy !== null}

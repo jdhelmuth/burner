@@ -10,27 +10,25 @@ begin
 end;
 $$;
 
-create or replace function public.handle_new_user()
-returns trigger
-language plpgsql
-security definer
-set search_path = public
-as $$
-begin
-  insert into public.profiles (id, display_name, username)
-  values (
-    new.id,
-    coalesce(new.raw_user_meta_data ->> 'display_name', split_part(new.email, '@', 1), 'burner-sender'),
-    lower(replace(coalesce(new.raw_user_meta_data ->> 'display_name', split_part(new.email, '@', 1), 'burner-sender'), ' ', '-'))
-  )
-  on conflict (id) do nothing;
+create table if not exists public.users (
+  id uuid primary key default gen_random_uuid(),
+  email text not null unique,
+  password_hash text not null,
+  display_name text,
+  created_at timestamptz not null default timezone('utc', now()),
+  updated_at timestamptz not null default timezone('utc', now())
+);
 
-  return new;
-end;
-$$;
+create table if not exists public.user_sessions (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid not null references public.users(id) on delete cascade,
+  token_hash text not null unique,
+  expires_at timestamptz not null,
+  created_at timestamptz not null default timezone('utc', now())
+);
 
 create table if not exists public.profiles (
-  id uuid primary key references auth.users(id) on delete cascade,
+  id uuid primary key references public.users(id) on delete cascade,
   username text unique,
   display_name text not null,
   avatar_url text,
@@ -86,6 +84,7 @@ create table if not exists public.burner_share_links (
   slug text not null unique,
   short_code text not null unique,
   token_hash text not null,
+  owner_share_token_ciphertext text,
   expires_at timestamptz,
   revoked_at timestamptz,
   max_opens integer,
@@ -128,116 +127,21 @@ create table if not exists public.track_unlock_events (
   created_at timestamptz not null default timezone('utc', now())
 );
 
-create trigger handle_profiles_updated_at
-before update on public.profiles
-for each row execute procedure public.handle_updated_at();
+create trigger handle_users_updated_at before update on public.users for each row execute procedure public.handle_updated_at();
+create trigger handle_profiles_updated_at before update on public.profiles for each row execute procedure public.handle_updated_at();
+create trigger handle_provider_accounts_updated_at before update on public.provider_accounts for each row execute procedure public.handle_updated_at();
+create trigger handle_burners_updated_at before update on public.burners for each row execute procedure public.handle_updated_at();
+create trigger handle_share_links_updated_at before update on public.burner_share_links for each row execute procedure public.handle_updated_at();
+create trigger handle_recipient_sessions_updated_at before update on public.burner_recipient_sessions for each row execute procedure public.handle_updated_at();
 
-create trigger handle_provider_accounts_updated_at
-before update on public.provider_accounts
-for each row execute procedure public.handle_updated_at();
-
-create trigger handle_burners_updated_at
-before update on public.burners
-for each row execute procedure public.handle_updated_at();
-
-create trigger handle_share_links_updated_at
-before update on public.burner_share_links
-for each row execute procedure public.handle_updated_at();
-
-create trigger handle_recipient_sessions_updated_at
-before update on public.burner_recipient_sessions
-for each row execute procedure public.handle_updated_at();
-
-create trigger on_auth_user_created
-after insert on auth.users
-for each row execute procedure public.handle_new_user();
-
-alter table public.profiles enable row level security;
-alter table public.provider_accounts enable row level security;
-alter table public.burners enable row level security;
-alter table public.burner_tracks enable row level security;
-alter table public.burner_share_links enable row level security;
-alter table public.burner_recipient_sessions enable row level security;
-alter table public.listen_sessions enable row level security;
-alter table public.track_unlock_events enable row level security;
-
-create policy "profiles are self readable"
-on public.profiles
-for select
-using (auth.uid() = id);
-
-create policy "profiles are self insertable"
-on public.profiles
-for insert
-with check (auth.uid() = id);
-
-create policy "profiles are self updatable"
-on public.profiles
-for update
-using (auth.uid() = id);
-
-create policy "provider accounts belong to sender"
-on public.provider_accounts
-for all
-using (auth.uid() = user_id)
-with check (auth.uid() = user_id);
-
-create policy "burners belong to sender"
-on public.burners
-for all
-using (auth.uid() = sender_id)
-with check (auth.uid() = sender_id);
-
-create policy "burner tracks visible only to burner owner"
-on public.burner_tracks
-for all
-using (
-  exists (
-    select 1 from public.burners
-    where burners.id = burner_tracks.burner_id
-      and burners.sender_id = auth.uid()
-  )
-)
-with check (
-  exists (
-    select 1 from public.burners
-    where burners.id = burner_tracks.burner_id
-      and burners.sender_id = auth.uid()
-  )
-);
-
-create policy "share links belong to sender"
-on public.burner_share_links
-for all
-using (
-  exists (
-    select 1 from public.burners
-    where burners.id = burner_share_links.burner_id
-      and burners.sender_id = auth.uid()
-  )
-)
-with check (
-  exists (
-    select 1 from public.burners
-    where burners.id = burner_share_links.burner_id
-      and burners.sender_id = auth.uid()
-  )
-);
-
-create policy "recipient sessions are service managed"
-on public.burner_recipient_sessions
-for all
-using (false)
-with check (false);
-
-create policy "listen sessions are service managed"
-on public.listen_sessions
-for all
-using (false)
-with check (false);
-
-create policy "unlock events are service managed"
-on public.track_unlock_events
-for all
-using (false)
-with check (false);
+create index if not exists user_sessions_user_id_idx on public.user_sessions (user_id);
+create index if not exists user_sessions_expires_at_idx on public.user_sessions (expires_at);
+create index if not exists burners_sender_id_idx on public.burners (sender_id);
+create index if not exists burner_share_links_burner_id_idx on public.burner_share_links (burner_id);
+create index if not exists burner_recipient_sessions_burner_id_idx on public.burner_recipient_sessions (burner_id);
+create index if not exists burner_recipient_sessions_share_link_id_idx on public.burner_recipient_sessions (share_link_id);
+create index if not exists listen_sessions_burner_position_idx on public.listen_sessions (burner_id, position);
+create index if not exists listen_sessions_recipient_session_idx on public.listen_sessions (recipient_session_id);
+create index if not exists track_unlock_events_burner_position_idx on public.track_unlock_events (burner_id, position);
+create index if not exists track_unlock_events_recipient_session_idx on public.track_unlock_events (recipient_session_id);
+create index if not exists burner_share_links_active_idx on public.burner_share_links (burner_id) where revoked_at is null;

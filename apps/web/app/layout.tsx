@@ -1,5 +1,6 @@
 import "./globals.css";
 import type { Metadata } from "next";
+import { Analytics } from "@vercel/analytics/next";
 import { webRetroThemeClassName, webRetroThemeCss } from "@burner/ui";
 
 import { CanonicalLocalhost } from "../components/canonical-localhost";
@@ -23,6 +24,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
       <body className={webRetroThemeClassName}>
         <CanonicalLocalhost />
         {children}
+        <Analytics />
       </body>
     </html>
   );

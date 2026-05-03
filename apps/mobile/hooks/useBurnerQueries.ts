@@ -3,7 +3,7 @@ import { createBurnerShell, createLocalShareExchange, encodeLocalSharePacket } f
 
 import { demoDraft } from "../lib/demo-data";
 import { env, runtimeFlags } from "../lib/env";
-import { supabase } from "../lib/supabase";
+import { useAuth } from "../contexts/AuthContext";
 import { useBurnerComposer } from "./useBurnerComposer";
 
 export function usePreviewBurner() {
@@ -22,10 +22,11 @@ export function usePreviewBurner() {
 
 export function usePublishBurner() {
   const draft = useBurnerComposer();
+  const { session } = useAuth();
 
   return useMutation({
     mutationFn: async () => {
-      if (!runtimeFlags.isSupabaseConfigured) {
+      if (!runtimeFlags.isBackendConfigured || !session?.access_token) {
         const packet = encodeLocalSharePacket(draft);
         const slug = draft.title.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") || "burner";
         return {
@@ -35,15 +36,21 @@ export function usePublishBurner() {
         };
       }
 
-      const { data, error } = await supabase.functions.invoke("create-burner", {
-        body: draft,
+      const response = await fetch(`${env.burnerWebUrl.replace(/\/$/, "")}/api/create-burner`, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${session.access_token}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(draft),
       });
 
-      if (error) {
-        throw error;
+      if (!response.ok) {
+        const payload = (await response.json().catch(() => null)) as { error?: string } | null;
+        throw new Error(payload?.error ?? "Could not publish burner.");
       }
 
-      return data as { slug: string; shareUrl: string; shortCode: string };
+      return response.json() as Promise<{ slug: string; shareUrl: string; shortCode: string }>;
     },
   });
 }
@@ -56,23 +63,25 @@ export function useRecipientBurner(slug: string, token?: string, payload?: strin
         return createLocalShareExchange(slug, payload);
       }
 
-      if (!runtimeFlags.isSupabaseConfigured) {
+      if (!runtimeFlags.isBackendConfigured) {
         return createLocalShareExchange(slug, encodeLocalSharePacket(demoDraft));
       }
 
-      const { data, error } = await supabase.functions.invoke("exchange-share-access", {
-        body: {
+      const response = await fetch(`${env.burnerWebUrl.replace(/\/$/, "")}/api/exchange-share-access`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
           slug,
           token,
           clientFingerprint: "mobile-anon",
-        },
+        }),
       });
 
-      if (error) {
+      if (!response.ok) {
         return createLocalShareExchange(slug, encodeLocalSharePacket(demoDraft));
       }
 
-      return data;
+      return response.json();
     },
   });
 }

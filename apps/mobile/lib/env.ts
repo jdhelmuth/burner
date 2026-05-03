@@ -20,14 +20,12 @@ const configuredScheme =
 export const env = {
   appScheme: configuredScheme || "burner",
   authRedirectPath: "auth/callback",
-  supabaseUrl: process.env.EXPO_PUBLIC_SUPABASE_URL ?? "",
-  supabaseAnonKey: process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY ?? "",
   burnerWebUrl:
     process.env.EXPO_PUBLIC_BURNER_WEB_URL ??
     (typeof extra.EXPO_PUBLIC_BURNER_WEB_URL === "string" ? extra.EXPO_PUBLIC_BURNER_WEB_URL : ""),
 };
 
 export const runtimeFlags = {
-  isSupabaseConfigured: Boolean(env.supabaseUrl && env.supabaseAnonKey),
+  isBackendConfigured: Boolean(env.burnerWebUrl),
   isLocalWebConfigured: Boolean(env.burnerWebUrl),
 };

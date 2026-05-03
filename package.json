@@ -6,9 +6,7 @@
   "scripts": {
     "dev:mobile": "pnpm --filter burner-mobile dev",
     "dev:web": "pnpm --filter burner-web dev",
-    "supabase:start": "NPM_CONFIG_CACHE=./.npm-cache npx supabase start",
-    "supabase:status": "NPM_CONFIG_CACHE=./.npm-cache npx supabase status -o env",
-    "supabase:functions": "NPM_CONFIG_CACHE=./.npm-cache npx supabase functions serve --env-file supabase/.env.local",
+    "neon:migrate": "node scripts/run-neon-migrations.mjs",
     "lint": "turbo run lint",
     "typecheck": "turbo run typecheck",
     "test": "turbo run test",
@@ -16,7 +14,10 @@
     "format": "prettier --write ."
   },
   "devDependencies": {
+    "@neondatabase/serverless": "^1.1.0",
     "@types/node": "^22.10.2",
+    "@types/pg": "^8.20.0",
+    "pg": "^8.20.0",
     "prettier": "^3.4.2",
     "turbo": "^2.4.0",
     "typescript": "^5.7.2",

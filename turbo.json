@@ -3,6 +3,21 @@
   "tasks": {
     "build": {
       "dependsOn": ["^build"],
+      "env": [
+        "DATABASE_URL",
+        "FIELD_ENCRYPTION_KEY",
+        "NEXT_PUBLIC_BURNER_APP_URL",
+        "NEXT_PUBLIC_DEVELOPER_DONATION_LABEL",
+        "NEXT_PUBLIC_DEVELOPER_DONATION_MESSAGE",
+        "NEXT_PUBLIC_DEVELOPER_DONATION_SECONDARY_LABEL",
+        "NEXT_PUBLIC_DEVELOPER_DONATION_SECONDARY_URL",
+        "NEXT_PUBLIC_DEVELOPER_DONATION_URL",
+        "NEXT_PUBLIC_DISABLE_BACKEND",
+        "NEXT_PUBLIC_TURNSTILE_SITE_KEY",
+        "NEXT_PUBLIC_WEB_ORIGIN",
+        "RESEND_API_KEY",
+        "RESEND_FROM_EMAIL"
+      ],
       "outputs": [".next/**", "dist/**", "build/**"]
     },
     "dev": {

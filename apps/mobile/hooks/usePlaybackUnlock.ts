@@ -2,8 +2,7 @@ import { useMutation } from "@tanstack/react-query";
 
 import type { ImportedTrack } from "@burner/core";
 
-import { runtimeFlags } from "../lib/env";
-import { supabase } from "../lib/supabase";
+import { env, runtimeFlags } from "../lib/env";
 
 export function useStartListenSession() {
   return useMutation({
@@ -13,22 +12,25 @@ export function useStartListenSession() {
       sessionToken: string;
       provider: string;
     }) => {
-      if (!runtimeFlags.isSupabaseConfigured || input.sessionToken.startsWith("local-")) {
+      if (!runtimeFlags.isBackendConfigured || input.sessionToken.startsWith("local-")) {
         return {
           id: `listen-${input.burnerId}-${input.position}`,
           started_at: new Date().toISOString(),
         };
       }
 
-      const { data, error } = await supabase.functions.invoke("start-listen-session", {
-        body: input,
+      const response = await fetch(`${env.burnerWebUrl.replace(/\/$/, "")}/api/start-listen-session`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(input),
       });
 
-      if (error) {
-        throw error;
+      if (!response.ok) {
+        const payload = (await response.json().catch(() => null)) as { error?: string } | null;
+        throw new Error(payload?.error ?? "Could not start listen session.");
       }
 
-      return data;
+      return response.json();
     },
   });
 }
@@ -43,7 +45,7 @@ export function useCompleteTrackUnlock() {
       observedCompletion: boolean;
       tracks?: ImportedTrack[];
     }) => {
-      if (!runtimeFlags.isSupabaseConfigured || input.sessionToken.startsWith("local-")) {
+      if (!runtimeFlags.isBackendConfigured || input.sessionToken.startsWith("local-")) {
         const nextTrack = input.tracks?.[input.position];
         return {
           status: "unlocked",
@@ -64,15 +66,18 @@ export function useCompleteTrackUnlock() {
         };
       }
 
-      const { data, error } = await supabase.functions.invoke("complete-track-unlock", {
-        body: input,
+      const response = await fetch(`${env.burnerWebUrl.replace(/\/$/, "")}/api/complete-track-unlock`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(input),
       });
 
-      if (error) {
-        throw error;
+      if (!response.ok) {
+        const payload = (await response.json().catch(() => null)) as { error?: string } | null;
+        throw new Error(payload?.error ?? "Could not unlock track.");
       }
 
-      return data;
+      return response.json();
     },
   });
 }
