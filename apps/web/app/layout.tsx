@@ -1,5 +1,6 @@
 import "./globals.css";
 import type { Metadata } from "next";
+import type { ReactNode } from "react";
 import { Analytics } from "@vercel/analytics/next";
 import { webRetroThemeClassName, webRetroThemeCss } from "@burner/ui";
 
@@ -33,7 +34,7 @@ const themeBootScript = `
 })();
 `.trim();
 
-export default function RootLayout({ children }: { children: React.ReactNode }) {
+export default function RootLayout({ children }: { children: ReactNode }) {
   return (
     <html className={webRetroThemeClassName} lang="en" suppressHydrationWarning>
       <head>

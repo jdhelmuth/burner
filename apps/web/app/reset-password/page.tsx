@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import type { FormEvent } from "react";
 import { useMemo, useState } from "react";
 
 export default function ResetPasswordPage() {
@@ -15,7 +16,7 @@ export default function ResetPasswordPage() {
   const [busy, setBusy] = useState(false);
   const [complete, setComplete] = useState(false);
 
-  async function submitReset(event: React.FormEvent<HTMLFormElement>) {
+  async function submitReset(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setBusy(true);
     setMessage(null);

@@ -2,7 +2,14 @@
 
 import Link from "next/link";
 import Script from "next/script";
-import { Fragment, useEffect, useMemo, useRef, useState } from "react";
+import {
+  Fragment,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import type { DragEvent } from "react";
 
 import {
@@ -63,6 +70,25 @@ interface YouTubeResolveResponse {
 
 type PreviewTransport = "audio" | "embed" | "youtube" | null;
 const BURN_ANIMATION_DURATION_MS = 1800;
+const ONBOARDING_STORAGE_KEY = "burner:web:onboarding:v1";
+
+const onboardingSteps = [
+  {
+    eyebrow: "Step 1 of 3",
+    title: "Build the disc",
+    copy: "Paste YouTube song links or a playlist, then use the cover and detail fields to make the burner feel personal.",
+  },
+  {
+    eyebrow: "Step 2 of 3",
+    title: "Check the order",
+    copy: "Click a row to load the preview deck, press play when you want to listen, and drag songs to reorder the mix.",
+  },
+  {
+    eyebrow: "Step 3 of 3",
+    title: "Burn and share",
+    copy: "Press Burn Link when the mix is ready. Burner creates one share page you can copy, email, or reopen from your history after signing in.",
+  },
+] as const;
 
 declare global {
   interface Window {
@@ -272,6 +298,7 @@ export function HomeClient() {
   const [shareFeedback, setShareFeedback] = useState<string | null>(null);
   const [showShareDialog, setShowShareDialog] = useState(false);
   const [showBurnAnimation, setShowBurnAnimation] = useState(false);
+  const [onboardingStep, setOnboardingStep] = useState<number | null>(null);
   const [title, setTitle] = useState(defaultDraft.title);
   const [senderName, setSenderName] = useState(defaultDraft.senderName);
   const [note, setNote] = useState(defaultDraft.note ?? "");
@@ -325,6 +352,65 @@ export function HomeClient() {
   const showingManagedYouTubePreview = Boolean(
     previewTransport === "youtube" && previewTrack && youtubeVideoId,
   );
+
+  const rememberOnboardingSeen = useCallback(() => {
+    try {
+      window.localStorage.setItem(ONBOARDING_STORAGE_KEY, "seen");
+    } catch {
+      // Storage can be unavailable in private browsing; closing still works.
+    }
+  }, []);
+
+  const dismissOnboarding = useCallback(() => {
+    rememberOnboardingSeen();
+    setOnboardingStep(null);
+  }, [rememberOnboardingSeen]);
+
+  const advanceOnboarding = useCallback(() => {
+    setOnboardingStep((current) => {
+      if (current === null) {
+        return current;
+      }
+
+      if (current >= onboardingSteps.length - 1) {
+        rememberOnboardingSeen();
+        return null;
+      }
+
+      return current + 1;
+    });
+  }, [rememberOnboardingSeen]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") {
+      return;
+    }
+
+    try {
+      if (window.localStorage.getItem(ONBOARDING_STORAGE_KEY) === "seen") {
+        return;
+      }
+    } catch {
+      return;
+    }
+
+    setOnboardingStep(0);
+  }, []);
+
+  useEffect(() => {
+    if (onboardingStep === null) {
+      return;
+    }
+
+    function handleKeyDown(event: KeyboardEvent) {
+      if (event.key === "Escape") {
+        dismissOnboarding();
+      }
+    }
+
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [dismissOnboarding, onboardingStep]);
 
   useEffect(() => {
     if (!runtimeFlags.isBackendConfigured) {
@@ -1452,6 +1538,11 @@ export function HomeClient() {
     runtimeFlags.isBackendConfigured && !session
       ? "Burn links without an account. Want your burn history later? Create an account, then sign in from the top right."
       : null;
+  const activeOnboardingIndex = onboardingStep ?? -1;
+  const activeOnboardingStep =
+    activeOnboardingIndex >= 0
+      ? onboardingSteps[activeOnboardingIndex]
+      : null;
 
   return (
     <main className="app-shell itunes-shell">
@@ -1675,6 +1766,91 @@ export function HomeClient() {
                 {authMessage ? (
                   <p className="status-message">{authMessage}</p>
                 ) : null}
+              </div>
+            </div>
+          </div>
+        </div>
+      ) : null}
+      {activeOnboardingStep ? (
+        <div
+          aria-labelledby="onboarding-dialog-title"
+          aria-modal="true"
+          className="share-dialog onboarding-dialog"
+          onClick={(event) => {
+            if (event.target === event.currentTarget) {
+              dismissOnboarding();
+            }
+          }}
+          role="dialog"
+        >
+          <div className="share-dialog__panel onboarding-dialog__panel">
+            <div className="onboarding-dialog__header">
+              <div className="stack-xs">
+                <strong className="share-dialog__eyebrow">
+                  {activeOnboardingStep.eyebrow}
+                </strong>
+                <h2
+                  className="share-dialog__title"
+                  id="onboarding-dialog-title"
+                >
+                  {activeOnboardingStep.title}
+                </h2>
+                <p className="share-dialog__copy">
+                  {activeOnboardingStep.copy}
+                </p>
+              </div>
+              <button
+                aria-label="Skip onboarding"
+                className="button button--secondary"
+                onClick={dismissOnboarding}
+                type="button"
+              >
+                Skip
+              </button>
+            </div>
+            <div className="onboarding-dialog__body">
+              <div className="onboarding-dialog__visual" aria-hidden="true">
+                <span className="onboarding-dialog__disc">
+                  <span />
+                </span>
+                <div className="onboarding-dialog__tracks">
+                  {onboardingSteps.map((step, index) => (
+                    <span
+                      className={
+                        index === activeOnboardingIndex
+                          ? "onboarding-dialog__track onboarding-dialog__track--active"
+                          : "onboarding-dialog__track"
+                      }
+                      key={step.title}
+                    />
+                  ))}
+                </div>
+              </div>
+              <div className="onboarding-dialog__footer">
+                <div
+                  aria-label={`Onboarding step ${activeOnboardingIndex + 1} of ${onboardingSteps.length}`}
+                  className="onboarding-dialog__dots"
+                >
+                  {onboardingSteps.map((step, index) => (
+                    <span
+                      className={
+                        index === activeOnboardingIndex
+                          ? "onboarding-dialog__dot onboarding-dialog__dot--active"
+                          : "onboarding-dialog__dot"
+                      }
+                      key={step.eyebrow}
+                    />
+                  ))}
+                </div>
+                <button
+                  className="button button--primary"
+                  onClick={advanceOnboarding}
+                  type="button"
+                >
+                  {activeOnboardingIndex === onboardingSteps.length - 1
+                    ? "Start Burning"
+                    : "Next"}
+                </button>
               </div>
             </div>
           </div>

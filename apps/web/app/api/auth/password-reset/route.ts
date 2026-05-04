@@ -22,7 +22,8 @@ async function sendResetEmail(input: {
   }
 
   const from =
-    process.env.RESEND_FROM_EMAIL?.trim() || "Burner <onboarding@resend.dev>";
+    process.env.RESEND_FROM_EMAIL?.trim() ||
+    "Burner <noreply@deltaproconstruction.com>";
   const resend = new Resend(apiKey);
 
   const { error } = await resend.emails.send({
