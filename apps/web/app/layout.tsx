@@ -47,9 +47,9 @@ export default function RootLayout({ children }: { children: ReactNode }) {
         <script dangerouslySetInnerHTML={{ __html: themeBootScript }} />
       </head>
       <body>
+        <ThemeToggle />
         <CanonicalLocalhost />
         {children}
-        <ThemeToggle />
         <Analytics />
       </body>
     </html>

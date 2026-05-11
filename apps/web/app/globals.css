@@ -3205,6 +3205,10 @@ hr {
 }
 
 @media (max-width: 680px) {
+  .theme-toggle {
+    margin: 12px 12px 0 auto;
+  }
+
   .app-shell {
     padding: 16px 12px 48px;
   }
@@ -3832,16 +3836,16 @@ hr {
   background: linear-gradient(180deg, #2a1a17 0%, #3a2722 100%);
 }
 
-/* Floating theme toggle */
+/* Top utility theme toggle */
 .theme-toggle {
-  position: fixed;
-  top: 14px;
-  right: 14px;
-  z-index: 9999;
-  display: inline-flex;
+  position: relative;
+  z-index: 20;
+  display: flex;
   align-items: center;
   justify-content: center;
   gap: 2px;
+  width: max-content;
+  margin: 16px 28px 0 auto;
   padding: 3px;
   border-radius: 999px;
   border: 1px solid var(--hairline-strong);
