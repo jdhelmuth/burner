@@ -21,15 +21,20 @@ const themeBootScript = `
 (function () {
   try {
     var stored = localStorage.getItem('burner-theme');
+    var preference = stored === 'dark' || stored === 'light' || stored === 'system'
+      ? stored
+      : 'system';
     var prefersDark =
       typeof window.matchMedia === 'function' &&
       window.matchMedia('(prefers-color-scheme: dark)').matches;
-    var theme = stored === 'dark' || stored === 'light'
-      ? stored
+    var theme = preference === 'dark' || preference === 'light'
+      ? preference
       : prefersDark ? 'dark' : 'light';
     document.documentElement.dataset.theme = theme;
+    document.documentElement.dataset.themePreference = preference;
   } catch (e) {
     document.documentElement.dataset.theme = 'light';
+    document.documentElement.dataset.themePreference = 'system';
   }
 })();
 `.trim();
