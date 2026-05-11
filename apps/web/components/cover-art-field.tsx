@@ -1,5 +1,6 @@
 "use client";
 
+import NextImage from "next/image";
 import { useEffect, useRef, useState } from "react";
 import type { ChangeEvent, PointerEvent } from "react";
 
@@ -38,7 +39,8 @@ async function loadImageFromSource(sourceUrl: string) {
     }
 
     image.onload = () => resolve(image);
-    image.onerror = () => reject(new Error("Burner could not load that image. Try another file."));
+    image.onerror = () =>
+      reject(new Error("Burner could not load that image. Try another file."));
     image.src = sourceUrl;
   });
 }
@@ -58,7 +60,11 @@ async function renderCoverDataUrl(
   }
 
   const scale = COVER_EXPORT_SIZE / COVER_EDITOR_FRAME_SIZE;
-  const renderSize = getCoverArtRenderSize(dimensions, COVER_EDITOR_FRAME_SIZE, transform.zoom);
+  const renderSize = getCoverArtRenderSize(
+    dimensions,
+    COVER_EDITOR_FRAME_SIZE,
+    transform.zoom,
+  );
 
   context.drawImage(
     image,
@@ -75,10 +81,14 @@ export function CoverArtField({ value, onChange }: CoverArtFieldProps) {
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const loadedImageRef = useRef<HTMLImageElement | null>(null);
   const dragStateRef = useRef<DragState | null>(null);
-  const [uploadedSourceUrl, setUploadedSourceUrl] = useState<string | null>(null);
+  const [uploadedSourceUrl, setUploadedSourceUrl] = useState<string | null>(
+    null,
+  );
   const [editorSourceUrl, setEditorSourceUrl] = useState<string | null>(null);
-  const [editorDimensions, setEditorDimensions] = useState<CoverArtDimensions | null>(null);
-  const [editorTransform, setEditorTransform] = useState<CoverArtTransform | null>(null);
+  const [editorDimensions, setEditorDimensions] =
+    useState<CoverArtDimensions | null>(null);
+  const [editorTransform, setEditorTransform] =
+    useState<CoverArtTransform | null>(null);
   const [editorOpen, setEditorOpen] = useState(false);
   const [editorBusy, setEditorBusy] = useState(false);
   const [dragging, setDragging] = useState(false);
@@ -86,7 +96,11 @@ export function CoverArtField({ value, onChange }: CoverArtFieldProps) {
   const previewSource = value || null;
   const editorRenderSize =
     editorDimensions && editorTransform
-      ? getCoverArtRenderSize(editorDimensions, COVER_EDITOR_FRAME_SIZE, editorTransform.zoom)
+      ? getCoverArtRenderSize(
+          editorDimensions,
+          COVER_EDITOR_FRAME_SIZE,
+          editorTransform.zoom,
+        )
       : null;
 
   useEffect(() => {
@@ -161,7 +175,9 @@ export function CoverArtField({ value, onChange }: CoverArtFieldProps) {
     }
 
     if (file.size > MAX_FILE_SIZE) {
-      setStatusMessage("Keep cover art under 12 MB so Burner can process it quickly.");
+      setStatusMessage(
+        "Keep cover art under 12 MB so Burner can process it quickly.",
+      );
       return;
     }
 
@@ -176,7 +192,10 @@ export function CoverArtField({ value, onChange }: CoverArtFieldProps) {
     dragStateRef.current = null;
   }
 
-  function handleBackdropClick(target: EventTarget | null, currentTarget: EventTarget | null) {
+  function handleBackdropClick(
+    target: EventTarget | null,
+    currentTarget: EventTarget | null,
+  ) {
     if (target === currentTarget && !editorBusy) {
       closeEditor();
     }
@@ -224,7 +243,10 @@ export function CoverArtField({ value, onChange }: CoverArtFieldProps) {
   }
 
   function handlePointerUp(event: PointerEvent<HTMLDivElement>) {
-    if (!dragStateRef.current || dragStateRef.current.pointerId !== event.pointerId) {
+    if (
+      !dragStateRef.current ||
+      dragStateRef.current.pointerId !== event.pointerId
+    ) {
       return;
     }
 
@@ -241,12 +263,18 @@ export function CoverArtField({ value, onChange }: CoverArtFieldProps) {
     setEditorBusy(true);
 
     try {
-      const nextDataUrl = await renderCoverDataUrl(loadedImageRef.current, editorDimensions, editorTransform);
+      const nextDataUrl = await renderCoverDataUrl(
+        loadedImageRef.current,
+        editorDimensions,
+        editorTransform,
+      );
       onChange(nextDataUrl);
       setStatusMessage("Cover art updated.");
       closeEditor();
     } catch {
-      setStatusMessage("Burner could not save that crop. Upload the image again and retry.");
+      setStatusMessage(
+        "Burner could not save that crop. Upload the image again and retry.",
+      );
     } finally {
       setEditorBusy(false);
     }
@@ -262,10 +290,28 @@ export function CoverArtField({ value, onChange }: CoverArtFieldProps) {
 
   return (
     <div className="itunes-coverfield">
-      <input accept="image/*" className="itunes-coverfield__input" onChange={handleFileChange} ref={fileInputRef} type="file" />
+      <input
+        accept="image/*"
+        className="itunes-coverfield__input"
+        onChange={handleFileChange}
+        ref={fileInputRef}
+        type="file"
+      />
 
-      <div className={`itunes-coverfield__preview ${previewSource ? "" : "itunes-coverfield__preview--empty"}`}>
-        {previewSource ? <img alt="Selected cover art preview" src={previewSource} /> : <span>Upload a square-ish image and fine-tune the crop.</span>}
+      <div
+        className={`itunes-coverfield__preview ${previewSource ? "" : "itunes-coverfield__preview--empty"}`}
+      >
+        {previewSource ? (
+          <NextImage
+            alt="Selected cover art preview"
+            fill
+            sizes="140px"
+            src={previewSource}
+            unoptimized
+          />
+        ) : (
+          <span>Upload a square-ish image and fine-tune the crop.</span>
+        )}
       </div>
 
       <div className="itunes-coverfield__actions">
@@ -290,19 +336,35 @@ export function CoverArtField({ value, onChange }: CoverArtFieldProps) {
         >
           Adjust Crop
         </button>
-        <button className="button button--secondary" disabled={editorBusy || !previewSource} onClick={handleRemove} type="button">
+        <button
+          className="button button--secondary"
+          disabled={editorBusy || !previewSource}
+          onClick={handleRemove}
+          type="button"
+        >
           Remove
         </button>
       </div>
 
-      <p className="itunes-coverfield__hint">Upload a JPG, PNG, or WebP. Burner saves a square crop for the web player.</p>
-      {statusMessage ? <p className="itunes-coverfield__status">{statusMessage}</p> : null}
+      <p className="itunes-coverfield__hint">
+        Upload a JPG, PNG, or WebP. Burner saves a square crop for the web
+        player.
+      </p>
+      {statusMessage ? (
+        <p className="itunes-coverfield__status">{statusMessage}</p>
+      ) : null}
 
-      {editorOpen && editorSourceUrl && editorDimensions && editorTransform && editorRenderSize ? (
+      {editorOpen &&
+      editorSourceUrl &&
+      editorDimensions &&
+      editorTransform &&
+      editorRenderSize ? (
         <div
           aria-modal="true"
           className="cover-editor"
-          onClick={(event) => handleBackdropClick(event.target, event.currentTarget)}
+          onClick={(event) =>
+            handleBackdropClick(event.target, event.currentTarget)
+          }
           role="dialog"
         >
           <div className="cover-editor__panel">
@@ -311,7 +373,12 @@ export function CoverArtField({ value, onChange }: CoverArtFieldProps) {
                 <strong>Adjust Cover Art</strong>
                 <p>Drag the image until the square crop feels right.</p>
               </div>
-              <button className="button button--secondary" disabled={editorBusy} onClick={closeEditor} type="button">
+              <button
+                className="button button--secondary"
+                disabled={editorBusy}
+                onClick={closeEditor}
+                type="button"
+              >
                 Cancel
               </button>
             </div>
@@ -324,16 +391,19 @@ export function CoverArtField({ value, onChange }: CoverArtFieldProps) {
                 onPointerUp={handlePointerUp}
                 onPointerCancel={handlePointerUp}
               >
-                <img
+                <NextImage
                   alt=""
                   className="cover-editor__image"
                   draggable={false}
+                  height={Math.round(editorRenderSize.height)}
                   src={editorSourceUrl}
                   style={{
                     width: `${editorRenderSize.width}px`,
                     height: `${editorRenderSize.height}px`,
                     transform: `translate(${editorTransform.offsetX}px, ${editorTransform.offsetY}px)`,
                   }}
+                  unoptimized
+                  width={Math.round(editorRenderSize.width)}
                 />
                 <div className="cover-editor__frame" />
               </div>
@@ -347,7 +417,14 @@ export function CoverArtField({ value, onChange }: CoverArtFieldProps) {
                     onChange={(event) => {
                       const nextZoom = Number(event.target.value);
                       setEditorTransform((current) =>
-                        current ? updateCoverZoom(current, nextZoom, editorDimensions, COVER_EDITOR_FRAME_SIZE) : current,
+                        current
+                          ? updateCoverZoom(
+                              current,
+                              nextZoom,
+                              editorDimensions,
+                              COVER_EDITOR_FRAME_SIZE,
+                            )
+                          : current,
                       );
                     }}
                     step="0.01"
@@ -357,20 +434,33 @@ export function CoverArtField({ value, onChange }: CoverArtFieldProps) {
                 </label>
 
                 <div className="cover-editor__meta">
-                  <span>{editorDimensions.width} × {editorDimensions.height}</span>
-                  <span>Exported as {COVER_EXPORT_SIZE} × {COVER_EXPORT_SIZE} JPEG</span>
+                  <span>
+                    {editorDimensions.width} × {editorDimensions.height}
+                  </span>
+                  <span>
+                    Exported as {COVER_EXPORT_SIZE} × {COVER_EXPORT_SIZE} JPEG
+                  </span>
                 </div>
 
                 <div className="cover-editor__buttonrow">
                   <button
                     className="button button--secondary"
                     disabled={editorBusy}
-                    onClick={() => setEditorTransform(createInitialCoverTransform(editorDimensions))}
+                    onClick={() =>
+                      setEditorTransform(
+                        createInitialCoverTransform(editorDimensions),
+                      )
+                    }
                     type="button"
                   >
                     Reset
                   </button>
-                  <button className="button button--primary" disabled={editorBusy} onClick={() => void handleSave()} type="button">
+                  <button
+                    className="button button--primary"
+                    disabled={editorBusy}
+                    onClick={() => void handleSave()}
+                    type="button"
+                  >
                     {editorBusy ? "Saving..." : "Save Cover"}
                   </button>
                 </div>

@@ -5,6 +5,7 @@
       "dependsOn": ["^build"],
       "env": [
         "DATABASE_URL",
+        "CLERK_SECRET_KEY",
         "FIELD_ENCRYPTION_KEY",
         "GOOGLE_OAUTH_CLIENT_ID",
         "GOOGLE_OAUTH_CLIENT_SECRET",

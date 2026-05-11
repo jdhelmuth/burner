@@ -1,5 +1,6 @@
 "use client";
 
+import Image from "next/image";
 import Link from "next/link";
 import { useEffect, useState } from "react";
 
@@ -30,7 +31,11 @@ type ShareLinkRow = {
 
 type LoadState =
   | { kind: "loading" }
-  | { kind: "ready"; burners: BurnerRow[]; shareLinks: Record<string, ShareLinkRow> }
+  | {
+      kind: "ready";
+      burners: BurnerRow[];
+      shareLinks: Record<string, ShareLinkRow>;
+    }
   | { kind: "error"; message: string };
 
 function formatCreatedAt(iso: string) {
@@ -98,18 +103,19 @@ export function MyBurnsClient() {
       setActionError(null);
 
       const response = await fetch("/api/burners", { credentials: "include" });
-      const payload = (await response.json().catch(() => null)) as
-        | {
-            burners?: BurnerRow[];
-            shareLinks?: ShareLinkRow[];
-            error?: string;
-          }
-        | null;
+      const payload = (await response.json().catch(() => null)) as {
+        burners?: BurnerRow[];
+        shareLinks?: ShareLinkRow[];
+        error?: string;
+      } | null;
 
       if (cancelled) return;
 
       if (!response.ok) {
-        setState({ kind: "error", message: payload?.error ?? "Could not load burns." });
+        setState({
+          kind: "error",
+          message: payload?.error ?? "Could not load burns.",
+        });
         return;
       }
 
@@ -151,7 +157,9 @@ export function MyBurnsClient() {
     });
 
     if (!response.ok) {
-      const payload = (await response.json().catch(() => null)) as { error?: string } | null;
+      const payload = (await response.json().catch(() => null)) as {
+        error?: string;
+      } | null;
       setActionError(payload?.error ?? "Could not delete that burn.");
       setPendingAction(null);
       return;
@@ -258,10 +266,12 @@ export function MyBurnsClient() {
                   >
                     <div className="my-burns__cover">
                       {burner.cover_image_url ? (
-                        <img
+                        <Image
                           alt=""
+                          fill
+                          sizes="72px"
                           src={burner.cover_image_url}
-                          loading="lazy"
+                          unoptimized
                         />
                       ) : (
                         <span>{burner.title.slice(0, 1) || "B"}</span>

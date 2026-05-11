@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import type {
   ImportedTrack,
@@ -17,10 +17,7 @@ import {
   providerLabel,
 } from "../lib/receiver-helpers";
 import { readReceiverState, writeReceiverState } from "../lib/receiver-state";
-import {
-  buildShareEmailHref,
-  copyText,
-} from "../lib/share-utils";
+import { buildShareEmailHref, copyText } from "../lib/share-utils";
 import { loadYouTubeIframeApi } from "../lib/youtube-player";
 import {
   normalizeYouTubeTrackMetadata,
@@ -348,7 +345,7 @@ export function ReceiverShell({ exchange }: { exchange: ReceiverExchange }) {
     loadedPlayerTrackStarted &&
     !activeTrackStarted
       ? `Track ${formatTrackPosition(activeTrackPosition)} is selected next. Press Play or Next to switch and reveal it.`
-        : currentVisibleTrack
+      : currentVisibleTrack
         ? [
             currentVisibleAlbumName ? `From ${currentVisibleAlbumName}` : null,
             currentVisibleProvider
@@ -358,8 +355,7 @@ export function ReceiverShell({ exchange }: { exchange: ReceiverExchange }) {
             .filter(Boolean)
             .join(" • ") || "Track metadata is revealed once playback starts."
         : "Press Play or Next to start this hidden track. Burner reveals it only after playback begins.";
-  const shareUrl =
-    typeof window === "undefined" ? "" : window.location.href;
+  const shareUrl = typeof window === "undefined" ? "" : window.location.href;
   const receiverShareEmailHref = shareUrl
     ? buildShareEmailHref({
         senderName: exchange.burner.senderName,
@@ -368,7 +364,7 @@ export function ReceiverShell({ exchange }: { exchange: ReceiverExchange }) {
       })
     : "";
 
-  function rememberPrefetchedTrack(track: RevealedTrack) {
+  const rememberPrefetchedTrack = useCallback((track: RevealedTrack) => {
     const normalizedTrack = normalizeYouTubeTrackMetadata(track);
 
     setPrefetchedTracks((current) => {
@@ -389,9 +385,9 @@ export function ReceiverShell({ exchange }: { exchange: ReceiverExchange }) {
     });
 
     return normalizedTrack;
-  }
+  }, []);
 
-  function forgetPrefetchedTrack(position: number) {
+  const forgetPrefetchedTrack = useCallback((position: number) => {
     setPrefetchedTracks((current) => {
       if (!(position in current)) {
         return current;
@@ -401,7 +397,7 @@ export function ReceiverShell({ exchange }: { exchange: ReceiverExchange }) {
       delete nextTracks[position];
       return nextTracks;
     });
-  }
+  }, []);
 
   async function copyReceiverShareUrl() {
     if (!shareUrl) {
@@ -503,8 +499,130 @@ export function ReceiverShell({ exchange }: { exchange: ReceiverExchange }) {
     activeTrackQueuedAfterCurrent && loadedPlayerPosition !== null
       ? loadedPlayerPosition
       : previousSelectablePosition;
-  const nextTransportPosition =
-    activeTrackQueuedAfterCurrent ? activeTrackPosition : nextSelectablePosition;
+  const nextTransportPosition = activeTrackQueuedAfterCurrent
+    ? activeTrackPosition
+    : nextSelectablePosition;
+
+  const revealTrack = useCallback(
+    (track: RevealedTrack) => {
+      const normalizedTrack = normalizeYouTubeTrackMetadata(track);
+      forgetPrefetchedTrack(normalizedTrack.position);
+
+      setRevealedTracks((current) => {
+        if (
+          current.some(
+            (existingTrack) =>
+              existingTrack.position === normalizedTrack.position,
+          )
+        ) {
+          return current;
+        }
+
+        return [...current, normalizedTrack].sort(
+          (left, right) => left.position - right.position,
+        );
+      });
+      setStartedPositions((current) =>
+        Array.from(new Set([...current, normalizedTrack.position])).sort(
+          (left, right) => left - right,
+        ),
+      );
+      setActiveTrackPosition(normalizedTrack.position);
+    },
+    [forgetPrefetchedTrack],
+  );
+
+  const finalizeTrackStart = useCallback(
+    async (track: RevealedTrack) => {
+      if (
+        startedPositionsRef.current.includes(track.position) ||
+        finalizingPositionsRef.current.has(track.position)
+      ) {
+        return;
+      }
+
+      finalizingPositionsRef.current.add(track.position);
+      setRequestState("advancing");
+
+      try {
+        let startedTrack = normalizeYouTubeTrackMetadata(track);
+        const listenSessionPromise = listenSessionPromisesRef.current.get(
+          track.position,
+        );
+
+        if (listenSessionPromise) {
+          const started = await listenSessionPromise;
+          if (started.status === "blocked") {
+            setStatusMessage("Burner lost its place. Refresh and try again.");
+            return;
+          }
+
+          if (started.track) {
+            startedTrack = rememberPrefetchedTrack(started.track);
+          }
+        }
+
+        revealTrack(startedTrack);
+        setPlayerTrack((current) =>
+          current?.position === startedTrack.position
+            ? { ...current, pendingReveal: false, track: startedTrack }
+            : current,
+        );
+
+        if (exchange.isLocalShare) {
+          const nextPosition =
+            startedTrack.position < exchange.burner.totalTracks
+              ? startedTrack.position + 1
+              : null;
+          setNextLockedPosition(nextPosition);
+          setStatusMessage(
+            nextPosition
+              ? `Track ${formatTrackPosition(startedTrack.position)} started. Track ${formatTrackPosition(nextPosition)} is up next.`
+              : "Last track started. The entire disc is visible now.",
+          );
+          return;
+        }
+
+        const unlocked = await completeTrackUnlock({
+          burnerId: exchange.burner.id,
+          position: startedTrack.position,
+          elapsedSeconds: 0,
+          observedCompletion: false,
+          sessionToken: exchange.sessionToken,
+        });
+
+        if (unlocked.status === "blocked") {
+          setStatusMessage("Burner lost its place. Refresh and try again.");
+          return;
+        }
+
+        if (unlocked.nextTrack) {
+          rememberPrefetchedTrack(unlocked.nextTrack);
+        }
+
+        setNextLockedPosition(unlocked.nextPosition ?? null);
+        setStatusMessage(
+          unlocked.nextPosition
+            ? `Track ${formatTrackPosition(startedTrack.position)} started. Track ${formatTrackPosition(unlocked.nextPosition)} is unlocked next.`
+            : "Last track started. The entire disc is visible now.",
+        );
+      } catch (error) {
+        setStatusMessage((error as Error).message);
+      } finally {
+        finalizingPositionsRef.current.delete(track.position);
+        setRequestState("idle");
+      }
+    },
+    [
+      exchange.burner.id,
+      exchange.burner.totalTracks,
+      exchange.isLocalShare,
+      exchange.sessionToken,
+      rememberPrefetchedTrack,
+      revealTrack,
+    ],
+  );
+
   useEffect(() => {
     playerTrackRef.current = playerTrack;
   }, [playerTrack]);
@@ -726,7 +844,7 @@ export function ReceiverShell({ exchange }: { exchange: ReceiverExchange }) {
     return () => {
       cancelled = true;
     };
-  }, [playerTrack]);
+  }, [finalizeTrackStart, playerTrack]);
 
   useEffect(() => {
     if (!playerRef.current || !playerTrackRef.current) {
@@ -753,32 +871,6 @@ export function ReceiverShell({ exchange }: { exchange: ReceiverExchange }) {
     };
   }, []);
 
-  function revealTrack(track: RevealedTrack) {
-    const normalizedTrack = normalizeYouTubeTrackMetadata(track);
-    forgetPrefetchedTrack(normalizedTrack.position);
-
-    setRevealedTracks((current) => {
-      if (
-        current.some(
-          (existingTrack) =>
-            existingTrack.position === normalizedTrack.position,
-        )
-      ) {
-        return current;
-      }
-
-      return [...current, normalizedTrack].sort(
-        (left, right) => left.position - right.position,
-      );
-    });
-    setStartedPositions((current) =>
-      Array.from(new Set([...current, normalizedTrack.position])).sort(
-        (left, right) => left - right,
-      ),
-    );
-    setActiveTrackPosition(normalizedTrack.position);
-  }
-
   function queueTrackForPlayback(
     track: RevealedTrack,
     options: { autoplay: boolean; pendingReveal: boolean },
@@ -799,87 +891,6 @@ export function ReceiverShell({ exchange }: { exchange: ReceiverExchange }) {
       track,
     }));
     return true;
-  }
-
-  async function finalizeTrackStart(track: RevealedTrack) {
-    if (
-      startedPositionsRef.current.includes(track.position) ||
-      finalizingPositionsRef.current.has(track.position)
-    ) {
-      return;
-    }
-
-    finalizingPositionsRef.current.add(track.position);
-    setRequestState("advancing");
-
-    try {
-      let startedTrack = normalizeYouTubeTrackMetadata(track);
-      const listenSessionPromise = listenSessionPromisesRef.current.get(
-        track.position,
-      );
-
-      if (listenSessionPromise) {
-        const started = await listenSessionPromise;
-        if (started.status === "blocked") {
-          setStatusMessage("Burner lost its place. Refresh and try again.");
-          return;
-        }
-
-        if (started.track) {
-          startedTrack = rememberPrefetchedTrack(started.track);
-        }
-      }
-
-      revealTrack(startedTrack);
-      setPlayerTrack((current) =>
-        current?.position === startedTrack.position
-          ? { ...current, pendingReveal: false, track: startedTrack }
-          : current,
-      );
-
-      if (exchange.isLocalShare) {
-        const nextPosition =
-          startedTrack.position < exchange.burner.totalTracks
-            ? startedTrack.position + 1
-            : null;
-        setNextLockedPosition(nextPosition);
-        setStatusMessage(
-          nextPosition
-            ? `Track ${formatTrackPosition(startedTrack.position)} started. Track ${formatTrackPosition(nextPosition)} is up next.`
-            : "Last track started. The entire disc is visible now.",
-        );
-        return;
-      }
-
-      const unlocked = await completeTrackUnlock({
-        burnerId: exchange.burner.id,
-        position: startedTrack.position,
-        elapsedSeconds: 0,
-        observedCompletion: false,
-        sessionToken: exchange.sessionToken,
-      });
-
-      if (unlocked.status === "blocked") {
-        setStatusMessage("Burner lost its place. Refresh and try again.");
-        return;
-      }
-
-      if (unlocked.nextTrack) {
-        rememberPrefetchedTrack(unlocked.nextTrack);
-      }
-
-      setNextLockedPosition(unlocked.nextPosition ?? null);
-      setStatusMessage(
-        unlocked.nextPosition
-          ? `Track ${formatTrackPosition(startedTrack.position)} started. Track ${formatTrackPosition(unlocked.nextPosition)} is unlocked next.`
-          : "Last track started. The entire disc is visible now.",
-      );
-    } catch (error) {
-      setStatusMessage((error as Error).message);
-    } finally {
-      finalizingPositionsRef.current.delete(track.position);
-      setRequestState("idle");
-    }
   }
 
   async function beginTrack(position = activeTrackPosition) {
@@ -1410,7 +1421,8 @@ export function ReceiverShell({ exchange }: { exchange: ReceiverExchange }) {
               </div>
 
               <div className="receiver-playerpanel__meta">
-                {nextLockedPosition && nextLockedPosition !== activeTrackPosition ? (
+                {nextLockedPosition &&
+                nextLockedPosition !== activeTrackPosition ? (
                   <button
                     className="receiver-transport__link"
                     disabled={requestState !== "idle"}

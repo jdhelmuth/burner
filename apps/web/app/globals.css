@@ -3464,6 +3464,7 @@ hr {
 }
 
 .my-burns__cover {
+  position: relative;
   width: 72px;
   height: 72px;
   border-radius: var(--radius);
