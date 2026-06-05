@@ -5,16 +5,24 @@ export type AppleMusicSongLocation = {
   songId: string;
 };
 
+export type AppleMusicLocation =
+  | { kind: "song"; storefront: string; songId: string }
+  | { kind: "album"; storefront: string; albumId: string }
+  | { kind: "playlist"; storefront: string; playlistId: string };
+
 const APPLE_MUSIC_HOSTS = new Set(["music.apple.com", "geo.music.apple.com"]);
 
-function normalizeSongId(value: string | null | undefined) {
+function normalizeNumericId(value: string | null | undefined) {
   const candidate = value?.trim();
   return candidate && /^\d+$/.test(candidate) ? candidate : null;
 }
 
-export function parseAppleMusicSongUrl(
-  rawValue: string,
-): AppleMusicSongLocation | null {
+function normalizePlaylistId(value: string | null | undefined) {
+  const candidate = value?.trim();
+  return candidate && /^pl\.[A-Za-z0-9_-]+$/.test(candidate) ? candidate : null;
+}
+
+export function parseAppleMusicUrl(rawValue: string): AppleMusicLocation | null {
   const trimmed = rawValue.trim();
   if (!trimmed) {
     return null;
@@ -33,15 +41,40 @@ export function parseAppleMusicSongUrl(
 
   const segments = url.pathname.split("/").filter(Boolean);
   const storefront = segments[0]?.toLowerCase() || "us";
-  const songId =
-    normalizeSongId(url.searchParams.get("i")) ??
-    normalizeSongId(segments.at(-1));
+  const type = segments[1]?.toLowerCase();
+  const lastSegment = segments.at(-1);
 
-  if (!songId) {
-    return null;
+  if (type === "playlist") {
+    const playlistId = normalizePlaylistId(lastSegment);
+    return playlistId ? { kind: "playlist", storefront, playlistId } : null;
   }
 
-  return { storefront, songId };
+  if (type === "album") {
+    // Album links carry the song id in the `i` query param when they point at
+    // a single track; otherwise the trailing segment is the album id.
+    const songId = normalizeNumericId(url.searchParams.get("i"));
+    if (songId) {
+      return { kind: "song", storefront, songId };
+    }
+
+    const albumId = normalizeNumericId(lastSegment);
+    return albumId ? { kind: "album", storefront, albumId } : null;
+  }
+
+  const songId =
+    normalizeNumericId(url.searchParams.get("i")) ??
+    normalizeNumericId(lastSegment);
+
+  return songId ? { kind: "song", storefront, songId } : null;
+}
+
+export function parseAppleMusicSongUrl(
+  rawValue: string,
+): AppleMusicSongLocation | null {
+  const parsed = parseAppleMusicUrl(rawValue);
+  return parsed?.kind === "song"
+    ? { storefront: parsed.storefront, songId: parsed.songId }
+    : null;
 }
 
 export function extractAppleMusicImportCandidates(rawValue: string) {
@@ -52,7 +85,7 @@ export function extractAppleMusicImportCandidates(rawValue: string) {
   const seen = new Set<string>();
 
   return candidates.filter((candidate) => {
-    if (!parseAppleMusicSongUrl(candidate) || seen.has(candidate)) {
+    if (!parseAppleMusicUrl(candidate) || seen.has(candidate)) {
       return false;
     }
 

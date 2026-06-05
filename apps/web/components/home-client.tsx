@@ -2124,9 +2124,10 @@ export function HomeClient() {
                 </button>
               </div>
               <p className="itunes-coverfield__hint">
-                Paste public YouTube links, a YouTube playlist URL, or Apple
-                Music song links. YouTube playlists import up to 50 tracks;
-                Apple Music imports song links through the catalog API.
+                Paste public YouTube links or a YouTube playlist URL, plus Apple
+                Music song, album, or playlist links. YouTube playlists and
+                Apple Music albums and playlists import up to 50 tracks each
+                through the catalog API.
               </p>
             </div>
 

@@ -5,7 +5,7 @@ import { readFile } from "node:fs/promises";
 
 import type { ImportedTrack } from "@burner/core";
 
-import { parseAppleMusicSongUrl } from "../apple-music";
+import { parseAppleMusicUrl } from "../apple-music";
 
 type AppleMusicArtwork = {
   url?: string;
@@ -24,18 +24,21 @@ type AppleMusicSongAttributes = {
   url?: string;
 };
 
-type AppleMusicSongResource = {
+type AppleMusicResource = {
   attributes?: AppleMusicSongAttributes;
   id?: string;
+  type?: string;
 };
 
-type AppleMusicSongResponse = {
-  data?: AppleMusicSongResource[];
+type AppleMusicResponse = {
+  data?: AppleMusicResource[];
+  next?: string;
   errors?: Array<{ detail?: string; title?: string }>;
 };
 
 const APPLE_MUSIC_API_ORIGIN = "https://api.music.apple.com";
 const TOKEN_MAX_AGE_SECONDS = 15_777_000 - 300;
+const MAX_APPLE_MUSIC_TRACKS = 50;
 
 let cachedGeneratedToken: {
   expiresAt: number;
@@ -138,6 +141,14 @@ export async function getAppleMusicDeveloperToken() {
   return cachedGeneratedToken.token;
 }
 
+async function appleMusicFetch(path: string) {
+  return fetch(`${APPLE_MUSIC_API_ORIGIN}${path}`, {
+    headers: {
+      Authorization: `Bearer ${await getAppleMusicDeveloperToken()}`,
+    },
+  });
+}
+
 function buildArtworkUrl(artwork: AppleMusicArtwork | undefined) {
   const url = artwork?.url;
   if (!url) {
@@ -147,44 +158,23 @@ function buildArtworkUrl(artwork: AppleMusicArtwork | undefined) {
   return url.replace("{w}x{h}", "1200x1200").replace("{f}", "jpg");
 }
 
-function getAppleMusicErrorMessage(payload: AppleMusicSongResponse) {
+function getAppleMusicErrorMessage(payload: AppleMusicResponse) {
   const error = payload.errors?.[0];
   return (
-    error?.detail ?? error?.title ?? "Apple Music could not resolve that song."
+    error?.detail ?? error?.title ?? "Apple Music could not resolve that link."
   );
 }
 
-export async function resolveAppleMusicTrack(
-  rawValue: string,
-): Promise<ImportedTrack> {
-  const parsed = parseAppleMusicSongUrl(rawValue);
-  if (!parsed) {
-    throw new Error("Paste a valid Apple Music song link.");
-  }
-
-  const response = await fetch(
-    `${APPLE_MUSIC_API_ORIGIN}/v1/catalog/${parsed.storefront}/songs/${parsed.songId}`,
-    {
-      headers: {
-        Authorization: `Bearer ${await getAppleMusicDeveloperToken()}`,
-      },
-    },
-  );
-  const payload = (await response
-    .json()
-    .catch(() => ({}))) as AppleMusicSongResponse;
-
-  if (!response.ok) {
-    throw new Error(getAppleMusicErrorMessage(payload));
-  }
-
-  const song = payload.data?.[0];
-  const attributes = song?.attributes;
+function buildAppleMusicTrack(
+  storefront: string,
+  resource: AppleMusicResource | undefined,
+): ImportedTrack | null {
+  const attributes = resource?.attributes;
   const title = attributes?.name?.trim();
   const artist = attributes?.artistName?.trim();
 
-  if (!song?.id || !title || !artist) {
-    throw new Error("Apple Music returned incomplete song metadata.");
+  if (!resource?.id || !title || !artist) {
+    return null;
   }
 
   return {
@@ -195,7 +185,108 @@ export async function resolveAppleMusicTrack(
     handoffUri: attributes?.url,
     previewUrl: attributes?.previews?.find((preview) => preview.url)?.url,
     provider: "appleMusic",
-    providerTrackId: `appleMusic:${parsed.storefront}:${song.id}`,
+    providerTrackId: `appleMusic:${storefront}:${resource.id}`,
     title,
   };
+}
+
+async function fetchAppleMusicSong(
+  storefront: string,
+  songId: string,
+): Promise<ImportedTrack> {
+  const response = await appleMusicFetch(
+    `/v1/catalog/${storefront}/songs/${songId}`,
+  );
+  const payload = (await response
+    .json()
+    .catch(() => ({}))) as AppleMusicResponse;
+
+  if (!response.ok) {
+    throw new Error(getAppleMusicErrorMessage(payload));
+  }
+
+  const track = buildAppleMusicTrack(storefront, payload.data?.[0]);
+  if (!track) {
+    throw new Error("Apple Music returned incomplete song metadata.");
+  }
+
+  return track;
+}
+
+async function fetchAppleMusicRelationshipTracks(
+  initialPath: string,
+  storefront: string,
+  limit = MAX_APPLE_MUSIC_TRACKS,
+): Promise<ImportedTrack[]> {
+  const tracks: ImportedTrack[] = [];
+  const seen = new Set<string>();
+  let nextPath: string | null = initialPath;
+
+  while (nextPath && tracks.length < limit) {
+    const response = await appleMusicFetch(nextPath);
+    const payload = (await response
+      .json()
+      .catch(() => ({}))) as AppleMusicResponse;
+
+    if (!response.ok) {
+      throw new Error(getAppleMusicErrorMessage(payload));
+    }
+
+    for (const resource of payload.data ?? []) {
+      const track = buildAppleMusicTrack(storefront, resource);
+      if (!track || seen.has(track.providerTrackId)) {
+        continue;
+      }
+
+      seen.add(track.providerTrackId);
+      tracks.push(track);
+      if (tracks.length >= limit) {
+        break;
+      }
+    }
+
+    nextPath = typeof payload.next === "string" ? payload.next : null;
+  }
+
+  if (tracks.length === 0) {
+    throw new Error("Apple Music returned no playable tracks for that link.");
+  }
+
+  return tracks;
+}
+
+export async function resolveAppleMusicTrack(
+  rawValue: string,
+): Promise<ImportedTrack> {
+  const parsed = parseAppleMusicUrl(rawValue);
+  if (parsed?.kind !== "song") {
+    throw new Error("Paste a valid Apple Music song link.");
+  }
+
+  return fetchAppleMusicSong(parsed.storefront, parsed.songId);
+}
+
+export async function resolveAppleMusicCandidate(
+  rawValue: string,
+): Promise<ImportedTrack[]> {
+  const parsed = parseAppleMusicUrl(rawValue);
+  if (!parsed) {
+    throw new Error("Paste a valid Apple Music song, album, or playlist link.");
+  }
+
+  if (parsed.kind === "song") {
+    return [await fetchAppleMusicSong(parsed.storefront, parsed.songId)];
+  }
+
+  if (parsed.kind === "album") {
+    return fetchAppleMusicRelationshipTracks(
+      `/v1/catalog/${parsed.storefront}/albums/${parsed.albumId}/tracks`,
+      parsed.storefront,
+    );
+  }
+
+  return fetchAppleMusicRelationshipTracks(
+    `/v1/catalog/${parsed.storefront}/playlists/${parsed.playlistId}/tracks`,
+    parsed.storefront,
+  );
 }
