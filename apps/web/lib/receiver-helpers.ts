@@ -38,6 +38,10 @@ export function providerLabel(provider: RevealedTrack["provider"]) {
     return "YouTube";
   }
 
+  if (provider === "appleMusic") {
+    return "Apple Music";
+  }
+
   if (provider === "generic") {
     return "Link";
   }

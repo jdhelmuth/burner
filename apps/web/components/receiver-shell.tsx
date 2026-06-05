@@ -1035,9 +1035,13 @@ export function ReceiverShell({ exchange }: { exchange: ReceiverExchange }) {
         pendingReveal: true,
       });
       if (!queued) {
-        setRequestState("idle");
+        // Providers without an inline browser player (e.g. Apple Music) can't
+        // embed in the receiver yet. Reveal the track and unlock the next one
+        // so the playlist never stalls, then point the listener at the
+        // provider link to actually listen.
+        await finalizeTrackStart(startedTrack);
         setStatusMessage(
-          `Track ${formatTrackPosition(position)} cannot be started inline, so Burner keeps it hidden.`,
+          `Track ${formatTrackPosition(position)} is revealed. Open it on ${providerLabel(startedTrack.provider)} to listen — inline playback isn't available for this source yet.`,
         );
         return;
       }

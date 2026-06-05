@@ -26,10 +26,7 @@ import {
   buildInAppPreviewEmbedUrl,
   supportsInAppPreview,
 } from "../lib/track-preview";
-import {
-  buildShareEmailHref,
-  copyText,
-} from "../lib/share-utils";
+import { buildShareEmailHref, copyText } from "../lib/share-utils";
 import { env, runtimeFlags } from "../lib/env";
 import {
   getSession,
@@ -50,6 +47,10 @@ import {
   getCanonicalBrowserOrigin,
 } from "../lib/browser-origin";
 import { getBurnerDraft } from "../lib/burner-api";
+import {
+  extractAppleMusicImportCandidates,
+  getAppleMusicTrackKey,
+} from "../lib/apple-music";
 interface PublishResult {
   burnerId: string;
   shareUrl: string;
@@ -67,6 +68,8 @@ interface YouTubeResolveResponse {
   tracks?: ImportedTrack[];
   error?: string;
 }
+
+type MusicResolveResponse = YouTubeResolveResponse;
 
 type PreviewTransport = "audio" | "embed" | "youtube" | null;
 const BURN_ANIMATION_DURATION_MS = 1800;
@@ -464,7 +467,11 @@ export function HomeClient() {
   }, []);
 
   useEffect(() => {
-    if (typeof window === "undefined" || !runtimeFlags.isBackendConfigured || !session) {
+    if (
+      typeof window === "undefined" ||
+      !runtimeFlags.isBackendConfigured ||
+      !session
+    ) {
       return;
     }
 
@@ -528,7 +535,9 @@ export function HomeClient() {
       exchange_failed: "Could not finish Google sign-in. Please try again.",
       access_denied: "Google sign-in was cancelled.",
     };
-    setAuthMessage(messages[authError] ?? `Google sign-in failed (${authError}).`);
+    setAuthMessage(
+      messages[authError] ?? `Google sign-in failed (${authError}).`,
+    );
     setShowAuthDialog(true);
     url.searchParams.delete("auth_error");
     window.history.replaceState(
@@ -1093,11 +1102,49 @@ export function HomeClient() {
     });
   }
 
-  async function importYouTubeLinks() {
-    const candidates = extractYouTubeImportCandidates(importText);
-    if (candidates.length === 0) {
+  async function resolveImportCandidates(
+    endpoint: string,
+    candidates: string[],
+  ) {
+    const requestBody = JSON.stringify({
+      urls: candidates,
+    });
+    const requestInit = {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: requestBody,
+    } satisfies RequestInit;
+    let response: Response;
+
+    try {
+      response = await fetch(endpoint, requestInit);
+    } catch {
+      response = await fetch(
+        buildBrowserApiUrl(
+          endpoint,
+          typeof window !== "undefined" ? window.location.origin : undefined,
+        ),
+        requestInit,
+      );
+    }
+    const payload = (await response.json()) as MusicResolveResponse;
+
+    if (!response.ok) {
+      throw new Error(payload.error ?? "Song import failed.");
+    }
+
+    return payload.tracks ?? (payload.track ? [payload.track] : []);
+  }
+
+  async function importMusicLinks() {
+    const youtubeCandidates = extractYouTubeImportCandidates(importText);
+    const appleMusicCandidates = extractAppleMusicImportCandidates(importText);
+
+    if (youtubeCandidates.length === 0 && appleMusicCandidates.length === 0) {
       setAuthMessage(
-        "Paste one or more public YouTube song links, one per line.",
+        "Paste one or more public YouTube or Apple Music song links, one per line.",
       );
       return;
     }
@@ -1106,50 +1153,32 @@ export function HomeClient() {
     setAuthMessage(null);
 
     try {
-      const requestBody = JSON.stringify({
-        urls: candidates,
-      });
-      const requestInit = {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: requestBody,
-      } satisfies RequestInit;
-      let response: Response;
-
-      try {
-        response = await fetch("/api/youtube/resolve", requestInit);
-      } catch {
-        response = await fetch(
-          buildBrowserApiUrl(
-            "/api/youtube/resolve",
-            typeof window !== "undefined" ? window.location.origin : undefined,
-          ),
-          requestInit,
-        );
-      }
-      const payload = (await response.json()) as YouTubeResolveResponse;
-
-      if (!response.ok) {
-        throw new Error(payload.error ?? "YouTube import failed.");
-      }
-
-      const resolvedTracks =
-        payload.tracks ?? (payload.track ? [payload.track] : []);
+      const resolvedTrackGroups = await Promise.all([
+        youtubeCandidates.length > 0
+          ? resolveImportCandidates("/api/youtube/resolve", youtubeCandidates)
+          : Promise.resolve([]),
+        appleMusicCandidates.length > 0
+          ? resolveImportCandidates(
+              "/api/apple-music/resolve",
+              appleMusicCandidates,
+            )
+          : Promise.resolve([]),
+      ]);
+      const resolvedTracks = resolvedTrackGroups.flat();
       if (resolvedTracks.length === 0) {
-        throw new Error("Burner could not resolve any of those YouTube links.");
+        throw new Error("Burner could not resolve any of those song links.");
       }
 
-      const seen = new Set(tracks.map((track) => track.providerTrackId));
+      const seen = new Set(tracks.map((track) => getAppleMusicTrackKey(track)));
       const tracksToAdd: ImportedTrack[] = [];
 
       for (const track of resolvedTracks) {
-        if (seen.has(track.providerTrackId)) {
+        const trackKey = getAppleMusicTrackKey(track);
+        if (seen.has(trackKey)) {
           continue;
         }
 
-        seen.add(track.providerTrackId);
+        seen.add(trackKey);
         tracksToAdd.push(track);
       }
 
@@ -1162,14 +1191,14 @@ export function HomeClient() {
 
       const duplicateCount = resolvedTracks.length - tracksToAdd.length;
       if (tracksToAdd.length === 0) {
-        setAuthMessage("Those YouTube songs are already on this burner.");
+        setAuthMessage("Those songs are already on this burner.");
       } else if (duplicateCount > 0) {
         setAuthMessage(
-          `Added ${tracksToAdd.length} YouTube song${tracksToAdd.length === 1 ? "" : "s"}. Skipped ${duplicateCount} already on this burner.`,
+          `Added ${tracksToAdd.length} song${tracksToAdd.length === 1 ? "" : "s"}. Skipped ${duplicateCount} already on this burner.`,
         );
       } else {
         setAuthMessage(
-          `Added ${tracksToAdd.length} YouTube song${tracksToAdd.length === 1 ? "" : "s"} to this burner.`,
+          `Added ${tracksToAdd.length} song${tracksToAdd.length === 1 ? "" : "s"} to this burner.`,
         );
       }
     } catch (error) {
@@ -1540,9 +1569,7 @@ export function HomeClient() {
       : null;
   const activeOnboardingIndex = onboardingStep ?? -1;
   const activeOnboardingStep =
-    activeOnboardingIndex >= 0
-      ? onboardingSteps[activeOnboardingIndex]
-      : null;
+    activeOnboardingIndex >= 0 ? onboardingSteps[activeOnboardingIndex] : null;
 
   return (
     <main className="app-shell itunes-shell">
@@ -1873,9 +1900,7 @@ export function HomeClient() {
               playlist link.
             </p>
             {editHydration.kind === "loading" ? (
-              <p className="studio-titleblock__copy">
-                Loading saved burn…
-              </p>
+              <p className="studio-titleblock__copy">Loading saved burn…</p>
             ) : editHydration.kind === "loaded" ? (
               <p className="studio-titleblock__copy">
                 Editing a copy of “{editHydration.sourceTitle}”. Burning will
@@ -2079,11 +2104,11 @@ export function HomeClient() {
             <div className="studio-addsongs">
               <div className="studio-addsongs__row">
                 <label className="field">
-                  <span>YouTube Links or Playlist</span>
+                  <span>YouTube or Apple Music Links</span>
                   <textarea
                     className="textarea textarea--compact"
                     placeholder={
-                      "https://youtu.be/dQw4w9WgXcQ\nhttps://www.youtube.com/playlist?list=PL..."
+                      "https://youtu.be/dQw4w9WgXcQ\nhttps://music.apple.com/us/album/...?...i=1234567890"
                     }
                     value={importText}
                     onChange={(event) => setImportText(event.target.value)}
@@ -2092,16 +2117,16 @@ export function HomeClient() {
                 <button
                   className="button button--primary"
                   disabled={importBusy}
-                  onClick={() => void importYouTubeLinks()}
+                  onClick={() => void importMusicLinks()}
                   type="button"
                 >
                   {importBusy ? "Resolving..." : "Add Songs"}
                 </button>
               </div>
               <p className="itunes-coverfield__hint">
-                Paste public YouTube links (one per line) or a playlist URL (up
-                to 50 tracks). Accepted formats: youtu.be, youtube.com/watch,
-                youtube.com/playlist, youtube.com/shorts, and raw video IDs.
+                Paste public YouTube links, a YouTube playlist URL, or Apple
+                Music song links. YouTube playlists import up to 50 tracks;
+                Apple Music imports song links through the catalog API.
               </p>
             </div>
 
@@ -2145,9 +2170,9 @@ export function HomeClient() {
                 >
                   {tracks.length === 0 ? (
                     <div className="itunes-emptyrow">
-                      Paste YouTube song links in the sidebar to start building
-                      the disc. Burner will resolve them and keep playback
-                      in-app.
+                      Paste YouTube or Apple Music song links above to start
+                      building the disc. Burner will resolve them and keep
+                      previews in-app when the provider allows it.
                     </div>
                   ) : null}
                   {tracks.map((track, index) => (

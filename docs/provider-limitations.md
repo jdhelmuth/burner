@@ -8,8 +8,10 @@
 
 ## Apple Music
 
+- Apple Music song-link import uses the server-side Apple Music catalog API with a Media Services private key or pre-generated developer token.
 - Apple Music supports stronger native playback via MusicKit across Apple platforms and supported environments.
-- Playlist import requires a developer token and user token.
+- The browser receiver cannot embed Apple Music inline yet: starting an Apple Music track reveals it and unlocks the next one, then hands off to the Apple Music link for actual listening. Inline preview playback in the receiver is planned for later.
+- Playlist and library import require a developer token plus a user token.
 - App Store production builds should use proper MusicKit entitlements and native configuration instead of Expo Go.
 
 ## Other apps
