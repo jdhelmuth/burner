@@ -41,6 +41,33 @@ type PlayerTrackState = {
 
 type ListenSessionStartResult = Awaited<ReturnType<typeof startListenSession>>;
 
+type PlaybackMedium = "youtube" | "audio" | "none";
+
+// Decide how a revealed track plays inside the receiver: YouTube tracks embed
+// the iframe player, anything with a 30s preview (e.g. Apple Music) plays
+// through the inline <audio> element, and everything else can only hand off to
+// the provider link.
+function getPlaybackMedium(
+  track:
+    | Pick<RevealedTrack, "providerUri" | "previewUrl">
+    | null
+    | undefined,
+): PlaybackMedium {
+  if (!track) {
+    return "none";
+  }
+
+  if (parseYouTubeVideoId(track.providerUri ?? "")) {
+    return "youtube";
+  }
+
+  if (track.previewUrl) {
+    return "audio";
+  }
+
+  return "none";
+}
+
 function TransportIcon({
   kind,
 }: {
@@ -181,7 +208,7 @@ export function ReceiverShell({ exchange }: { exchange: ReceiverExchange }) {
       const initialTrack = hydrated.revealedTracks.find(
         (track) => track.position === hydrated.activeTrackPosition,
       );
-      return initialTrack && parseYouTubeVideoId(initialTrack.providerUri ?? "")
+      return initialTrack && getPlaybackMedium(initialTrack) !== "none"
         ? {
             autoplay: false,
             key: 0,
@@ -225,6 +252,7 @@ export function ReceiverShell({ exchange }: { exchange: ReceiverExchange }) {
   const localTracks = exchange.localTracks ?? [];
   const playerHostRef = useRef<HTMLDivElement | null>(null);
   const playerRef = useRef<YouTubePlayer | null>(null);
+  const audioRef = useRef<HTMLAudioElement | null>(null);
   const playerTrackRef = useRef<PlayerTrackState | null>(playerTrack);
   const startedPositionsRef = useRef<number[]>(startedPositions);
   const finalizingPositionsRef = useRef<Set<number>>(new Set());
@@ -250,9 +278,8 @@ export function ReceiverShell({ exchange }: { exchange: ReceiverExchange }) {
   );
   const loadedPlayerPosition = playerTrack?.position ?? null;
   const loadedPlayerTrack = playerTrack?.track ?? null;
-  const loadedPlayerVideoId = parseYouTubeVideoId(
-    loadedPlayerTrack?.providerUri ?? "",
-  );
+  const loadedPlayerMedium = getPlaybackMedium(loadedPlayerTrack);
+  const loadedPlayerPlayable = loadedPlayerMedium !== "none";
   const loadedPlayerTrackStarted =
     loadedPlayerPosition !== null &&
     startedPositions.includes(loadedPlayerPosition);
@@ -261,10 +288,8 @@ export function ReceiverShell({ exchange }: { exchange: ReceiverExchange }) {
     loadedPlayerPosition !== activeTrackPosition,
   );
   const activeProviderLink = activeRevealedTrack?.providerUri ?? null;
-  const activeTrackCanPlayInline = Boolean(
-    activeRevealedTrack &&
-    parseYouTubeVideoId(activeRevealedTrack.providerUri ?? ""),
-  );
+  const activeTrackCanPlayInline =
+    getPlaybackMedium(activeRevealedTrack) !== "none";
   const activeTrackQueuedButHidden = Boolean(
     playerTrack?.pendingReveal &&
     playerTrack.position === activeTrackPosition &&
@@ -277,7 +302,7 @@ export function ReceiverShell({ exchange }: { exchange: ReceiverExchange }) {
   const activeTrackQueuedAfterCurrent = Boolean(
     !activeTrackStarted &&
     activeTrackUsesDifferentLoadedPlayer &&
-    loadedPlayerVideoId,
+    loadedPlayerPlayable,
   );
   const currentVisibleTrack =
     activeTrackUsesDifferentLoadedPlayer &&
@@ -457,9 +482,7 @@ export function ReceiverShell({ exchange }: { exchange: ReceiverExchange }) {
 
         return {
           active,
-          canPlayInline: Boolean(
-            track && parseYouTubeVideoId(track.providerUri ?? ""),
-          ),
+          canPlayInline: getPlaybackMedium(track) !== "none",
           canStart,
           detail,
           position,
@@ -710,9 +733,14 @@ export function ReceiverShell({ exchange }: { exchange: ReceiverExchange }) {
 
     const videoId = parseYouTubeVideoId(playerTrack.track.providerUri ?? "");
     if (!videoId) {
-      setPlayerReady(false);
-      setIsPlaying(false);
+      // Not a YouTube track — the inline <audio> effect owns playback state.
       return;
+    }
+    // A YouTube track is taking over the player: silence any audio preview.
+    try {
+      audioRef.current?.pause();
+    } catch {
+      // Ignore audio teardown races while switching mediums.
     }
     const resolvedVideoId = videoId;
     const nextPlayerTrack = playerTrack;
@@ -847,7 +875,7 @@ export function ReceiverShell({ exchange }: { exchange: ReceiverExchange }) {
   }, [finalizeTrackStart, playerTrack]);
 
   useEffect(() => {
-    if (!playerRef.current || !playerTrackRef.current) {
+    if (!playerTrackRef.current) {
       return;
     }
 
@@ -856,9 +884,15 @@ export function ReceiverShell({ exchange }: { exchange: ReceiverExchange }) {
     }
 
     try {
-      playerRef.current.pauseVideo();
+      playerRef.current?.pauseVideo();
     } catch {
       // Ignore YouTube API timing failures while switching rows.
+    }
+
+    try {
+      audioRef.current?.pause();
+    } catch {
+      // Ignore audio teardown races while switching rows.
     }
 
     setIsPlaying(false);
@@ -871,12 +905,122 @@ export function ReceiverShell({ exchange }: { exchange: ReceiverExchange }) {
     };
   }, []);
 
+  // Wire the inline <audio> element so Apple Music (and any preview-only) tracks
+  // play through the same transport, reveal, and unlock flow as YouTube.
+  useEffect(() => {
+    const audio = audioRef.current;
+    if (!audio) {
+      return;
+    }
+
+    const isActiveAudioTrack = () => {
+      const current = playerTrackRef.current;
+      return Boolean(current && getPlaybackMedium(current.track) === "audio");
+    };
+
+    const handlePlaying = () => {
+      if (!isActiveAudioTrack()) {
+        return;
+      }
+
+      const current = playerTrackRef.current;
+      setIsPlaying(true);
+      if (current?.pendingReveal) {
+        void finalizeTrackStart(current.track);
+      }
+    };
+
+    const handlePause = () => {
+      if (!isActiveAudioTrack() || audio.ended) {
+        return;
+      }
+
+      setIsPlaying(false);
+    };
+
+    const handleEnded = () => {
+      if (!isActiveAudioTrack()) {
+        return;
+      }
+
+      setIsPlaying(false);
+      if (!playerTrackRef.current?.pendingReveal) {
+        playNextTrackRef.current();
+      }
+    };
+
+    const handleError = () => {
+      if (!isActiveAudioTrack()) {
+        return;
+      }
+
+      const current = playerTrackRef.current;
+      setIsPlaying(false);
+      setRequestState("idle");
+      setStatusMessage(
+        `Track ${formatTrackPosition(current?.position ?? activeTrackPosition)} could not start its preview. Use the provider link to listen.`,
+      );
+    };
+
+    audio.addEventListener("playing", handlePlaying);
+    audio.addEventListener("pause", handlePause);
+    audio.addEventListener("ended", handleEnded);
+    audio.addEventListener("error", handleError);
+
+    return () => {
+      audio.removeEventListener("playing", handlePlaying);
+      audio.removeEventListener("pause", handlePause);
+      audio.removeEventListener("ended", handleEnded);
+      audio.removeEventListener("error", handleError);
+    };
+  }, [activeTrackPosition, finalizeTrackStart]);
+
+  // Load and (optionally) start the preview whenever an audio track is queued.
+  useEffect(() => {
+    const audio = audioRef.current;
+    if (!playerTrack || !audio) {
+      return;
+    }
+
+    if (getPlaybackMedium(playerTrack.track) !== "audio") {
+      return;
+    }
+
+    const previewUrl = playerTrack.track.previewUrl ?? "";
+    if (!previewUrl) {
+      return;
+    }
+
+    // Take the player away from any YouTube track.
+    try {
+      playerRef.current?.pauseVideo();
+    } catch {
+      // Ignore YouTube teardown races while switching mediums.
+    }
+
+    if (audio.src !== previewUrl) {
+      audio.src = previewUrl;
+    }
+    audio.currentTime = 0;
+    audio.load();
+    setPlayerReady(true);
+    setIsPlaying(false);
+
+    if (playerTrack.autoplay) {
+      void audio.play().catch(() => {
+        setRequestState("idle");
+        setStatusMessage(
+          `Press Play to start the preview for Track ${formatTrackPosition(playerTrack.position)}.`,
+        );
+      });
+    }
+  }, [playerTrack]);
+
   function queueTrackForPlayback(
     track: RevealedTrack,
     options: { autoplay: boolean; pendingReveal: boolean },
   ) {
-    const videoId = parseYouTubeVideoId(track.providerUri ?? "");
-    if (!videoId) {
+    if (getPlaybackMedium(track) === "none") {
       setPlayerTrack((current) =>
         current?.position === track.position ? null : current,
       );
@@ -1097,6 +1241,28 @@ export function ReceiverShell({ exchange }: { exchange: ReceiverExchange }) {
         playerTrack?.pendingReveal &&
         playerTrack.position === activeTrackPosition
       ) {
+        if (getPlaybackMedium(playerTrack.track) === "audio") {
+          const audio = audioRef.current;
+          if (!audio) {
+            setStatusMessage(
+              `Track ${formatTrackPosition(activeTrackPosition)} is still loading in the player. Press Play again in a moment.`,
+            );
+            return;
+          }
+
+          setRequestState("starting");
+          setStatusMessage(
+            `Starting Track ${formatTrackPosition(activeTrackPosition)}. Burner will reveal it as soon as it plays.`,
+          );
+          void audio.play().catch(() => {
+            setRequestState("idle");
+            setStatusMessage(
+              "The browser blocked playback. Press Play again after interacting with the page.",
+            );
+          });
+          return;
+        }
+
         if (!playerRef.current || !playerReady) {
           setStatusMessage(
             `Track ${formatTrackPosition(activeTrackPosition)} is still loading in the player. Press Play again in a moment.`,
@@ -1129,6 +1295,42 @@ export function ReceiverShell({ exchange }: { exchange: ReceiverExchange }) {
     if (!activeRevealedTrack || !activeTrackCanPlayInline) {
       setStatusMessage(
         `Track ${formatTrackPosition(activeTrackPosition)} is revealed, but inline playback is unavailable for this source.`,
+      );
+      return;
+    }
+
+    if (getPlaybackMedium(activeRevealedTrack) === "audio") {
+      const audio = audioRef.current;
+      if (!audio || playerTrackRef.current?.position !== activeTrackPosition) {
+        if (
+          queueTrackForPlayback(activeRevealedTrack, {
+            autoplay: true,
+            pendingReveal: false,
+          })
+        ) {
+          setStatusMessage(
+            `Track ${formatTrackPosition(activeTrackPosition)} is loading inside Burner.`,
+          );
+        }
+        return;
+      }
+
+      if (!audio.paused) {
+        audio.pause();
+        setIsPlaying(false);
+        setStatusMessage(
+          `Track ${formatTrackPosition(activeTrackPosition)} is paused.`,
+        );
+        return;
+      }
+
+      void audio.play().catch(() => {
+        setStatusMessage(
+          "The browser blocked playback. Press Play again after interacting with the page.",
+        );
+      });
+      setStatusMessage(
+        `Track ${formatTrackPosition(activeTrackPosition)} preview is playing inside Burner.`,
       );
       return;
     }
@@ -1382,9 +1584,50 @@ export function ReceiverShell({ exchange }: { exchange: ReceiverExchange }) {
               >
                 <div
                   ref={playerHostRef}
-                  className={`itunes-youtubeplayer ${loadedPlayerVideoId ? "" : "itunes-youtubeplayer--hidden"}`}
+                  className={`itunes-youtubeplayer ${loadedPlayerMedium === "youtube" ? "" : "itunes-youtubeplayer--hidden"}`}
                 />
-                {!loadedPlayerVideoId ? (
+                <audio
+                  ref={audioRef}
+                  className="receiver-audio"
+                  preload="none"
+                />
+                {loadedPlayerMedium === "audio" ? (
+                  <div className="receiver-audioplayer">
+                    {currentVisibleTrack?.albumArtUrl ? (
+                      <div
+                        aria-hidden="true"
+                        className={[
+                          "receiver-audioplayer__art",
+                          isPlaying
+                            ? "receiver-audioplayer__art--playing"
+                            : "",
+                        ]
+                          .filter(Boolean)
+                          .join(" ")}
+                        style={{
+                          backgroundImage: `url("${currentVisibleTrack.albumArtUrl}")`,
+                        }}
+                      />
+                    ) : null}
+                    <div className="receiver-audioplayer__copy">
+                      <strong>
+                        {isPlaying ? "Playing preview" : "Preview ready"}
+                      </strong>
+                      <span>
+                        {`${
+                          currentVisibleProvider
+                            ? providerLabel(currentVisibleProvider)
+                            : "Audio"
+                        } preview · 30 seconds.${
+                          currentVisibleProviderLink
+                            ? " Open the full song from the link below."
+                            : ""
+                        }`}
+                      </span>
+                    </div>
+                  </div>
+                ) : null}
+                {loadedPlayerMedium === "none" ? (
                   <div className="receiver-playerplaceholder">
                     <strong>
                       {activeTrackStarted
