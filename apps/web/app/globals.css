@@ -2478,6 +2478,17 @@ hr {
   width: 100%;
 }
 
+/* Audio tracks (e.g. Apple Music previews) don't need the 16:9 video stage —
+   let the frame shrink to the player so it stops looking like an empty box. */
+.receiver-playerframe--audio {
+  aspect-ratio: auto;
+}
+
+.receiver-playerframe--audio .receiver-audioplayer {
+  height: auto;
+  min-height: 240px;
+}
+
 .receiver-playerframe--loading {
   border-color: rgba(124, 174, 221, 0.42);
   box-shadow: 0 12px 30px rgba(18, 25, 37, 0.24);
@@ -2515,32 +2526,40 @@ hr {
   display: none;
 }
 
-.receiver-audioplayer {
+.receiver-playerframe .receiver-audioplayer {
   width: 100%;
   height: 100%;
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 14px;
-  padding: 24px;
+  gap: clamp(16px, 4vw, 30px);
+  padding: clamp(20px, 5%, 40px);
   text-align: center;
 }
 
 .receiver-audioplayer__art {
-  width: 132px;
-  height: 132px;
-  border-radius: 14px;
+  width: clamp(120px, 32%, 184px);
+  aspect-ratio: 1 / 1;
+  border-radius: 18px;
+  background-color: rgba(255, 255, 255, 0.06);
   background-size: cover;
   background-position: center;
+  display: grid;
+  place-items: center;
   box-shadow:
-    0 14px 30px rgba(8, 12, 20, 0.5),
-    inset 0 1px 0 rgba(255, 255, 255, 0.12);
-  transition: transform 0.2s ease;
+    0 22px 44px rgba(6, 10, 18, 0.6),
+    inset 0 1px 0 rgba(255, 255, 255, 0.14);
+  transition: transform 0.4s ease;
 }
 
 .receiver-audioplayer__art--playing {
-  animation: receiver-audioplayer-pulse 2.4s ease-in-out infinite;
+  animation: receiver-audioplayer-pulse 3.2s ease-in-out infinite;
+}
+
+.receiver-audioplayer__artfallback {
+  font-size: 2.6rem;
+  color: rgba(255, 255, 255, 0.5);
 }
 
 @keyframes receiver-audioplayer-pulse {
@@ -2549,23 +2568,106 @@ hr {
     transform: scale(1);
   }
   50% {
-    transform: scale(1.04);
+    transform: scale(1.035);
   }
 }
 
-.receiver-audioplayer__copy {
+.receiver-audioplayer__body {
+  width: min(460px, 100%);
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.receiver-audioplayer__meta {
   display: grid;
-  gap: 4px;
+  gap: 3px;
 }
 
-.receiver-audioplayer__copy strong {
-  color: rgba(255, 255, 255, 0.88);
+.receiver-audioplayer__meta strong {
+  color: rgba(255, 255, 255, 0.94);
+  font-size: var(--fs-md);
+  line-height: 1.2;
+}
+
+.receiver-audioplayer__meta span {
+  color: rgba(255, 255, 255, 0.62);
   font-size: var(--fs-sm);
 }
 
-.receiver-audioplayer__copy span {
-  color: rgba(255, 255, 255, 0.6);
-  font-size: var(--fs-sm);
+.receiver-audioplayer__scrubber {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 100%;
+  height: 6px;
+  margin: 6px 0 0;
+  border-radius: 999px;
+  background: linear-gradient(
+    to right,
+    var(--accent, #4480c2) 0%,
+    var(--accent, #4480c2) var(--audio-progress, 0%),
+    rgba(255, 255, 255, 0.18) var(--audio-progress, 0%),
+    rgba(255, 255, 255, 0.18) 100%
+  );
+  cursor: pointer;
+  outline: none;
+}
+
+.receiver-audioplayer__scrubber::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 15px;
+  height: 15px;
+  border-radius: 50%;
+  background: #ffffff;
+  border: 0;
+  box-shadow: 0 2px 6px rgba(6, 10, 18, 0.55);
+  cursor: pointer;
+  transition: transform 0.12s ease;
+}
+
+.receiver-audioplayer__scrubber:active::-webkit-slider-thumb {
+  transform: scale(1.18);
+}
+
+.receiver-audioplayer__scrubber::-moz-range-thumb {
+  width: 15px;
+  height: 15px;
+  border-radius: 50%;
+  background: #ffffff;
+  border: 0;
+  box-shadow: 0 2px 6px rgba(6, 10, 18, 0.55);
+  cursor: pointer;
+}
+
+.receiver-audioplayer__scrubber::-moz-range-progress {
+  height: 6px;
+  border-radius: 999px;
+  background: var(--accent, #4480c2);
+}
+
+.receiver-audioplayer__scrubber::-moz-range-track {
+  height: 6px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.18);
+}
+
+.receiver-audioplayer__scrubber:focus-visible {
+  box-shadow: 0 0 0 3px rgba(124, 174, 221, 0.45);
+}
+
+.receiver-audioplayer__times {
+  display: flex;
+  justify-content: space-between;
+  font-size: var(--fs-xs, 0.72rem);
+  font-variant-numeric: tabular-nums;
+  color: rgba(255, 255, 255, 0.56);
+}
+
+.receiver-audioplayer__hint {
+  margin: 2px 0 0;
+  font-size: var(--fs-xs, 0.72rem);
+  color: rgba(255, 255, 255, 0.42);
 }
 
 .receiver-playerloading {

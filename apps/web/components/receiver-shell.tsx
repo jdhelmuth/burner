@@ -1,5 +1,6 @@
 "use client";
 
+import type { CSSProperties } from "react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import type {
@@ -66,6 +67,17 @@ function getPlaybackMedium(
   }
 
   return "none";
+}
+
+function formatPlaybackTime(seconds: number) {
+  if (!Number.isFinite(seconds) || seconds < 0) {
+    return "0:00";
+  }
+
+  const total = Math.floor(seconds);
+  const minutes = Math.floor(total / 60);
+  const remainder = total % 60;
+  return `${minutes}:${remainder.toString().padStart(2, "0")}`;
 }
 
 function TransportIcon({
@@ -221,6 +233,8 @@ export function ReceiverShell({ exchange }: { exchange: ReceiverExchange }) {
   );
   const [playerReady, setPlayerReady] = useState(false);
   const [isPlaying, setIsPlaying] = useState(false);
+  const [audioCurrentTime, setAudioCurrentTime] = useState(0);
+  const [audioDuration, setAudioDuration] = useState(0);
   const [requestState, setRequestState] = useState<
     "idle" | "starting" | "advancing"
   >("idle");
@@ -280,6 +294,11 @@ export function ReceiverShell({ exchange }: { exchange: ReceiverExchange }) {
   const loadedPlayerTrack = playerTrack?.track ?? null;
   const loadedPlayerMedium = getPlaybackMedium(loadedPlayerTrack);
   const loadedPlayerPlayable = loadedPlayerMedium !== "none";
+  const audioScrubMax = audioDuration > 0 ? audioDuration : 30;
+  const audioProgressPct = Math.max(
+    0,
+    Math.min(100, (audioCurrentTime / audioScrubMax) * 100),
+  );
   const loadedPlayerTrackStarted =
     loadedPlayerPosition !== null &&
     startedPositions.includes(loadedPlayerPosition);
@@ -962,16 +981,38 @@ export function ReceiverShell({ exchange }: { exchange: ReceiverExchange }) {
       );
     };
 
+    const handleTimeUpdate = () => {
+      if (!isActiveAudioTrack()) {
+        return;
+      }
+
+      setAudioCurrentTime(audio.currentTime);
+    };
+
+    const handleDurationChange = () => {
+      if (!isActiveAudioTrack()) {
+        return;
+      }
+
+      setAudioDuration(Number.isFinite(audio.duration) ? audio.duration : 0);
+    };
+
     audio.addEventListener("playing", handlePlaying);
     audio.addEventListener("pause", handlePause);
     audio.addEventListener("ended", handleEnded);
     audio.addEventListener("error", handleError);
+    audio.addEventListener("timeupdate", handleTimeUpdate);
+    audio.addEventListener("loadedmetadata", handleDurationChange);
+    audio.addEventListener("durationchange", handleDurationChange);
 
     return () => {
       audio.removeEventListener("playing", handlePlaying);
       audio.removeEventListener("pause", handlePause);
       audio.removeEventListener("ended", handleEnded);
       audio.removeEventListener("error", handleError);
+      audio.removeEventListener("timeupdate", handleTimeUpdate);
+      audio.removeEventListener("loadedmetadata", handleDurationChange);
+      audio.removeEventListener("durationchange", handleDurationChange);
     };
   }, [activeTrackPosition, finalizeTrackStart]);
 
@@ -1005,6 +1046,8 @@ export function ReceiverShell({ exchange }: { exchange: ReceiverExchange }) {
     audio.load();
     setPlayerReady(true);
     setIsPlaying(false);
+    setAudioCurrentTime(0);
+    setAudioDuration(0);
 
     if (playerTrack.autoplay) {
       void audio.play().catch(() => {
@@ -1575,6 +1618,9 @@ export function ReceiverShell({ exchange }: { exchange: ReceiverExchange }) {
                 className={[
                   "receiver-playerframe",
                   "receiver-playerframe--stage",
+                  loadedPlayerMedium === "audio"
+                    ? "receiver-playerframe--audio"
+                    : "",
                   showPlayerLoadingTransition
                     ? "receiver-playerframe--loading"
                     : "",
@@ -1593,37 +1639,77 @@ export function ReceiverShell({ exchange }: { exchange: ReceiverExchange }) {
                 />
                 {loadedPlayerMedium === "audio" ? (
                   <div className="receiver-audioplayer">
-                    {currentVisibleTrack?.albumArtUrl ? (
-                      <div
-                        aria-hidden="true"
-                        className={[
-                          "receiver-audioplayer__art",
-                          isPlaying
-                            ? "receiver-audioplayer__art--playing"
-                            : "",
-                        ]
-                          .filter(Boolean)
-                          .join(" ")}
-                        style={{
-                          backgroundImage: `url("${currentVisibleTrack.albumArtUrl}")`,
+                    <div
+                      aria-hidden="true"
+                      className={[
+                        "receiver-audioplayer__art",
+                        isPlaying ? "receiver-audioplayer__art--playing" : "",
+                      ]
+                        .filter(Boolean)
+                        .join(" ")}
+                      style={
+                        currentVisibleTrack?.albumArtUrl
+                          ? {
+                              backgroundImage: `url("${currentVisibleTrack.albumArtUrl}")`,
+                            }
+                          : undefined
+                      }
+                    >
+                      {currentVisibleTrack?.albumArtUrl ? null : (
+                        <span className="receiver-audioplayer__artfallback">
+                          ♪
+                        </span>
+                      )}
+                    </div>
+                    <div className="receiver-audioplayer__body">
+                      <div className="receiver-audioplayer__meta">
+                        <strong>{currentVisibleTitle}</strong>
+                        <span>
+                          {[
+                            currentVisibleArtist,
+                            currentVisibleProvider
+                              ? providerLabel(currentVisibleProvider)
+                              : null,
+                          ]
+                            .filter(Boolean)
+                            .join(" • ")}
+                        </span>
+                      </div>
+                      <input
+                        aria-label={`Seek preview for Track ${formatTrackPosition(activeTrackPosition)}`}
+                        className="receiver-audioplayer__scrubber"
+                        max={audioScrubMax}
+                        min={0}
+                        onChange={(event) => {
+                          const audio = audioRef.current;
+                          const nextTime = Number(event.target.value);
+                          if (audio) {
+                            audio.currentTime = nextTime;
+                          }
+                          setAudioCurrentTime(nextTime);
                         }}
+                        step={0.1}
+                        style={
+                          {
+                            "--audio-progress": `${audioProgressPct}%`,
+                          } as CSSProperties
+                        }
+                        type="range"
+                        value={Math.min(audioCurrentTime, audioScrubMax)}
                       />
-                    ) : null}
-                    <div className="receiver-audioplayer__copy">
-                      <strong>
-                        {isPlaying ? "Playing preview" : "Preview ready"}
-                      </strong>
-                      <span>
-                        {`${
-                          currentVisibleProvider
-                            ? providerLabel(currentVisibleProvider)
-                            : "Audio"
-                        } preview · 30 seconds.${
-                          currentVisibleProviderLink
-                            ? " Open the full song from the link below."
-                            : ""
-                        }`}
-                      </span>
+                      <div className="receiver-audioplayer__times">
+                        <span>{formatPlaybackTime(audioCurrentTime)}</span>
+                        <span>{formatPlaybackTime(audioScrubMax)}</span>
+                      </div>
+                      <p className="receiver-audioplayer__hint">
+                        {currentVisibleProviderLink
+                          ? `30-second preview — open on ${
+                              currentVisibleProvider
+                                ? providerLabel(currentVisibleProvider)
+                                : "the provider"
+                            } below for the full song.`
+                          : "30-second preview."}
+                      </p>
                     </div>
                   </div>
                 ) : null}
